@@ -11,6 +11,7 @@ import pytest
 import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.components.frontend import DATA_PANELS
+from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.exceptions import HomeAssistantError
@@ -428,6 +429,41 @@ async def test_sidebar_panel_follows_the_rooms(hass: HomeAssistant) -> None:
     assert hass.http.async_register_static_paths.await_count == 1
     assert await hass.config_entries.async_unload(entry.entry_id)
     assert PANEL_URL_PATH not in panels
+
+
+async def test_rooms_starting_together_all_load_and_share_one_page(hass: HomeAssistant) -> None:
+    registered = []
+
+    async def register(configs) -> None:
+        # Like the real server: it waits for a worker thread, and refuses a second route.
+        await asyncio.sleep(0.05)
+        if registered:
+            raise RuntimeError("Added route will never be executed, method GET is already registered")
+        registered.extend(configs)
+
+    hass.http = Mock(async_register_static_paths=register)
+    second_thermostat = "climate.second_thermostat"
+    set_thermostat(hass)
+    set_thermostat(hass, entity_id=second_thermostat)
+    entries = [room_entry(), room_entry("Second", second_thermostat)]
+    for entry in entries:
+        entry.add_to_hass(hass)
+    # This is how Home Assistant starts: all rooms of the integration at the same time.
+    assert await async_setup_component(hass, DOMAIN, {})
+    await hass.async_block_till_done()
+    assert [entry.state for entry in entries] == [ConfigEntryState.LOADED] * 2
+    assert len(registered) == 1
+    assert PANEL_URL_PATH in hass.data[DATA_PANELS]
+
+
+async def test_room_is_controlled_even_if_the_page_cannot_be_added(hass: HomeAssistant, set_temperature_calls) -> None:
+    hass.http = Mock(async_register_static_paths=AsyncMock(side_effect=RuntimeError("no page")))
+    set_thermostat(hass, temperature=20.0, setpoint=19.0)
+    entry = await add_room(hass)
+    assert entry.state is ConfigEntryState.LOADED
+    assert PANEL_URL_PATH not in hass.data.get(DATA_PANELS, {})
+    await select_mode(hass, "active")
+    assert set_temperature_calls[-1].data["temperature"] == 23.0
 
 
 async def test_unload_gives_the_target_back_when_active(hass: HomeAssistant, set_temperature_calls) -> None:
