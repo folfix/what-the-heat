@@ -17,6 +17,20 @@ class DailyLogTest(unittest.TestCase):
         self.assertEqual(today["rms_deviation"], 0.507)
         self.assertAlmostEqual(today["room_mean"], 20.825, delta=0.01)
 
+    def test_a_reading_exactly_at_the_edge_of_the_band_is_inside_it(self) -> None:
+        for target, temperature in ((23.0, 23.3), (23.0, 22.7), (21.0, 21.3), (21.0, 20.7)):
+            with self.subTest(target=target, temperature=temperature):
+                log = DailyLog()
+                log.add("2026-11-05", HOUR, target=target, temperature=temperature)
+                self.assertEqual(log.today["time_in_band_pct"], 100.0)
+
+    def test_a_reading_beyond_the_band_is_outside_it(self) -> None:
+        for temperature in (23.4, 22.6):
+            with self.subTest(temperature=temperature):
+                log = DailyLog()
+                log.add("2026-11-05", HOUR, target=23.0, temperature=temperature)
+                self.assertEqual(log.today["time_in_band_pct"], 0.0)
+
     def test_heating_share_and_longest_closed_period(self) -> None:
         log = DailyLog()
         for is_heating, hours in ((True, 1.0), (False, 2.0), (True, 1.0), (False, 1.0)):

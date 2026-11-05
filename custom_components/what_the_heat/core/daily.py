@@ -110,7 +110,8 @@ class DailyLog:
             day.room_sum += temperature * dt_s
             day.target_sum += target * dt_s
             day.squared_deviation += deviation * deviation * dt_s
-            if abs(deviation) <= BAND:
+            # Rounded, because 23.3 - 23.0 comes out slightly above 0.3 in floating point.
+            if round(abs(deviation), 3) <= BAND:
                 day.within_band_s += dt_s
         if is_heating is not None:
             day.heating_known_s += dt_s
