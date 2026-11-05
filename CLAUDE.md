@@ -10,15 +10,17 @@ A Home Assistant custom integration for water-based underfloor heating. Requirem
 
 ## Commands
 
-- Tests: `python -m unittest discover -s tests -t .`
+- Core and simulation tests: `python -m unittest discover -s tests -t .`
 - Pilot room comparison: `python -m tests.simulation.pilot`
+- Integration tests on a real Home Assistant core: `python -m pytest` in an environment with `requirements_test.txt`. On Windows that environment also needs stand-ins for the Unix modules `fcntl` and `resource`.
 
 ## Design constraints
 
 - There are no floor sensors and there will be none. Floor temperature must never be a required input.
 - The temperature set on the heat pump is treated as the real buffer temperature, and it must not exceed 38 °C.
 - `custom_components/what_the_heat/__init__.py` must stay free of top-level Home Assistant imports, since importing the core runs it.
-- The control core has no Home Assistant imports and no third-party dependencies, so that it runs in the simulator and in unit tests.
+- The control core has no Home Assistant imports and no third-party dependencies, so that it runs in the simulator and in unit tests. Decisions belong in the core, and the Home Assistant layer stays thin.
+- A new room starts in observe mode, and observe mode never writes to a device.
 - Thermostats are controlled through setpoints only. Do not rely on `hvac_mode: off`.
 - Nothing critical may depend on SmartThings or AccuWeather, since both are cloud services.
 - Simulation results compare options. Do not present them as predictions for the real house.

@@ -1,0 +1,88 @@
+{
+  "config": {
+    "abort": {
+      "already_configured": "This thermostat already belongs to a room."
+    },
+    "step": {
+      "user": {
+        "title": "Add a room",
+        "description": "A new room starts in observe mode: it calculates and logs, and writes nothing to the thermostat until you select active mode.",
+        "data": {
+          "name": "Room name",
+          "thermostat": "Thermostat",
+          "target": "Target temperature",
+          "buffer_entity": "Heat pump or buffer entity",
+          "buffer_fallback": "Buffer temperature when no reading is available",
+          "outdoor_entity": "Outdoor temperature sensor",
+          "phase_offset": "Delay of the first cycle"
+        },
+        "data_description": {
+          "buffer_entity": "For a climate entity its set temperature is used, and for other entities their value.",
+          "buffer_fallback": "Used when the entity above is empty and no earlier reading exists.",
+          "outdoor_entity": "Only logged for now, for learning later.",
+          "phase_offset": "Set different values for different rooms, so that they do not all open together."
+        }
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Room settings",
+        "data": {
+          "buffer_entity": "Heat pump or buffer entity",
+          "buffer_fallback": "Buffer temperature when no reading is available",
+          "outdoor_entity": "Outdoor temperature sensor",
+          "phase_offset": "Delay of the first cycle"
+        },
+        "data_description": {
+          "buffer_entity": "For a climate entity its set temperature is used, and for other entities their value.",
+          "buffer_fallback": "Used when the entity above is empty and no earlier reading exists.",
+          "outdoor_entity": "Only logged for now, for learning later.",
+          "phase_offset": "Set different values for different rooms, so that they do not all open together."
+        }
+      }
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "valve_requested": { "name": "Valve requested" },
+      "problem": { "name": "Problem" }
+    },
+    "number": {
+      "target": { "name": "Target" }
+    },
+    "select": {
+      "mode": {
+        "name": "Mode",
+        "state": {
+          "observe": "Observe",
+          "active": "Active",
+          "handback": "Hand back to thermostat"
+        }
+      }
+    },
+    "sensor": {
+      "status": {
+        "name": "Status",
+        "state": {
+          "initializing": "Initializing",
+          "normal": "Normal",
+          "degraded": "Degraded",
+          "handback": "Handed back"
+        }
+      },
+      "duty": { "name": "Duty" },
+      "requested_setpoint": { "name": "Requested setpoint" },
+      "filtered_temperature": { "name": "Filtered temperature" },
+      "time_in_band_today": { "name": "Time in band today" },
+      "rms_deviation_today": { "name": "RMS deviation today" },
+      "heating_today": { "name": "Heating today" },
+      "longest_closed_today": { "name": "Longest closed today" },
+      "integral": { "name": "Integral" },
+      "assumed_buffer_temperature": { "name": "Assumed buffer temperature" },
+      "setpoint_writes": { "name": "Setpoint writes" },
+      "resends": { "name": "Resent commands" }
+    }
+  }
+}

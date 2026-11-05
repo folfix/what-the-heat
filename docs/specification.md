@@ -191,7 +191,7 @@ Worked example with `k1 = 0.27`, `k3 = 0.94`, target 21 °C, 3 °C outdoors: `L 
 - Control uses the setpoint only. `hvac_mode` stays on `heat`, in manual mode, with no device schedule.
 - Commands are tagged with a context so that user changes can be recognised.
 - The watchdog compares the commanded state with later reads and `hvac_action`, retries, and raises an alert after 3 consecutive mismatches. The commanded state is stored by the controller, separately from what is read back.
-- Wall display and manual changes: the display shows the setpoint alternating around the target. Proposed handling: treat a manual change on the wall as shifting the target by the same difference. **[TODO]** decide, or use the `Lock` entity.
+- Wall display and manual changes: the display shows the setpoint alternating around the target. For now the watchdog overwrites a manual change on the wall. Proposed handling: treat it as shifting the target by the same difference. **[TODO]** decide, or use the `Lock` entity.
 
 ### 6.4 L1: zone
 
@@ -254,15 +254,18 @@ Valve exercise: any loop idle for 7 days is opened for 15 minutes. The 15 second
 
 ### 6.9 Integration and repository
 
-The integration exposes per-zone target, duty, PID terms, valve state, status and learned parameters as entities, plus diagnostics. Each zone has a mode: `observe` (calculates and logs only), `active`, or `handback`.
+Each room is one configuration entry. The integration exposes the target, duty, PID terms, valve state, status and daily comfort metrics as entities, plus a diagnostics download with one row per day. Each zone has a mode: `observe` (calculates and logs only, the default for a new room), `active`, or `handback`.
+
+On switching from `observe` to `active`, the integral starts from how much the thermostat has recently been heating, but only if the room is near its target. Otherwise it starts from zero.
 
 ```
 custom_components/what_the_heat/
   core/          pure Python, no Home Assistant imports
-                 (pid, scheduler, feedforward, learning, buffer)
+                 (pid, cycle, valve, zone, runner, daily)
   ...            thin Home Assistant layer
-tests/
-  simulation/    three-node rooms, actuators, weather, DHW, shared buffer
+tests/           core tests, no dependencies
+  simulation/    three-node rooms, actuators, faults
+tests_ha/        integration tests on a real Home Assistant core
 docs/
 ```
 
@@ -388,7 +391,7 @@ Real basement walls and soil are likely to warm much more slowly than this model
 |---|---|---|
 | 0 Preparation | Extend recorder retention, start a baseline in the pilot room | Retention extended |
 | 1 Core and simulator | Pure Python core and simulator with failure injection | Done for the pilot scope: PID, cycles, valve, watchdog, zone |
-| 2 Integration | Home Assistant layer for one zone, in `observe` mode, with daily rows logged | Calculated duty looks sensible next to the real thermostat |
+| 2 Integration | Home Assistant layer with `observe`, `active` and `handback` modes, and daily rows logged | Built and tested against a stand-in thermostat. Calculated duty still has to be checked next to the real thermostat. |
 | 3 Pilot | One room live, see 9.1 | Criteria in 9.1 met |
 | 4 Learning and prediction | Learning and feed-forward, first in the simulator, then on the pilot room | Smaller RMS deviation than PID alone |
 | 5 All rooms | All zones, phase staggering, manifold recommendations, shared buffer in the simulator | One stable week |
@@ -397,7 +400,7 @@ Real basement walls and soil are likely to warm much more slowly than this model
 
 ### 9.1 Pilot
 
-A real test on one closed basement room, chosen for its small outside influence, at a target of 21 °C.
+A real test on one closed basement room, chosen for its small outside influence, at a target of 21 °C. The steps are in the [pilot test guide](pilot-test.md).
 
 - Only PID and cycles run. There is no prediction, learning or buffer control yet, but daily rows are logged from the first day.
 - The heat pump stays at a constant fixed temperature of at most 38 °C during comparisons, since changing it would also affect all other rooms. Those rooms remain on their own thermostats.

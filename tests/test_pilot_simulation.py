@@ -60,6 +60,15 @@ class PilotRoomTest(unittest.TestCase):
         plain = simulate(parameters, environment, TARGET, use_controller=False, **start)
         self.assertLess(controlled.reached_target_s, plain.reached_target_s + 6 * 3600.0)
 
+    def test_taking_over_from_the_thermostat_is_smooth(self) -> None:
+        # The runner first watches the thermostat for 3 days, then takes over.
+        for label, (parameters, ground) in ROOMS.items():
+            with self.subTest(room=label):
+                environment = Environment(buffer_setpoint=34.0, ground=ground)
+                result = simulate(parameters, environment, TARGET, initial_air=TARGET, observe_days=3.0)
+                self.assertGreaterEqual(result.within_band_pct, 90.0)
+                self.assertLess(result.first_days_high, TARGET + 0.6)
+
     def test_unreachable_target_saturates_without_alarm_from_the_watchdog(self) -> None:
         parameters, ground = ROOMS["high losses"]
         result = simulate(parameters, Environment(buffer_setpoint=30.0, ground=ground), TARGET)

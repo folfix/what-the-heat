@@ -48,6 +48,10 @@ class PidController:
         """Return the most recent output."""
         return self._last
 
+    @integral.setter
+    def integral(self, value: float) -> None:
+        self._integral = self._clamp_integral(value)
+
     def update(
         self,
         error: float,

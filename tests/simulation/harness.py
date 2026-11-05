@@ -1,4 +1,4 @@
-"""Runs one room with its thermostat, actuator and, optionally, the zone controller."""
+"""Runs one room with its thermostat, actuator and, optionally, the zone runner."""
 
 from __future__ import annotations
 
@@ -6,8 +6,16 @@ import math
 import random
 from dataclasses import dataclass, field
 
-from custom_components.what_the_heat.core.valve import ValveWatchdog, WatchdogConfig, WatchdogResult
-from custom_components.what_the_heat.core.zone import ZoneConfig, ZoneController, ZoneStatus
+from custom_components.what_the_heat.core.runner import (
+    CommandKind,
+    Mode,
+    Problem,
+    RunnerConfig,
+    ThermostatReading,
+    ZoneRunner,
+)
+from custom_components.what_the_heat.core.valve import WatchdogConfig
+from custom_components.what_the_heat.core.zone import ZoneConfig, ZoneStatus
 
 from .plant import Actuator, Room, RoomParameters, Thermostat
 
@@ -58,7 +66,7 @@ class Faults:
 
 @dataclass
 class Result:
-    """Measured behaviour. Only `floor_*` needs a value that a real installation cannot measure."""
+    """Measured behaviour. Only `floor_swing` needs a value that a real installation cannot measure."""
 
     within_band_pct: float = 0.0
     rms: float = 0.0
@@ -94,8 +102,14 @@ def simulate(
     initial_wall: float | None = None,
     initial_integral: float = 30.0,
     band: float = 0.3,
+    observe_days: float = 0.0,
 ) -> Result:
-    """Run the room and return what happened after the settling period."""
+    """Run the room and return what happened after the settling period.
+
+    With observe_days the room first runs on the plain thermostat, with the runner in
+    observe mode, and the runner then takes over. In that case settle_days counts from
+    the takeover.
+    """
     faults = faults or Faults()
     rng = random.Random(faults.seed)
     room = Room(
@@ -106,45 +120,59 @@ def simulate(
     )
     thermostat = Thermostat(setpoint=target)
     actuator = Actuator()
-    config = zone_config or ZoneConfig(target=target)
-    controller = ZoneController(config, integral=initial_integral) if use_controller else None
-    watchdog = ValveWatchdog(WatchdogConfig(differential=thermostat.differential))
+    config = RunnerConfig(
+        zone=zone_config or ZoneConfig(target=target),
+        watchdog=WatchdogConfig(differential=thermostat.differential),
+    )
+    runner = None
+    if use_controller:
+        start_mode = Mode.OBSERVE if observe_days > 0 else Mode.ACTIVE
+        runner = ZoneRunner(config, start_mode, integral=initial_integral if observe_days <= 0 else 0.0)
     result = Result()
     samples: list[float] = []
     floors: list[float] = []
     duty_sum = 0.0
     duty_count = 0
     relay_was = False
-    relay_since_s = settle_days * DAY_S
+    settle_s = (observe_days + settle_days) * DAY_S
+    relay_since_s = settle_s
     open_periods: list[float] = []
     closed_periods: list[float] = []
-    writes = 0
+    writes_at_settle = 0
     first_days_high = -math.inf
-    settle_s = settle_days * DAY_S
+    total_days = observe_days + days
+    takeover_s = observe_days * DAY_S
 
-    steps = int(days * DAY_S / STEP_S)
-    for index in range(steps):
+    for index in range(int(total_days * DAY_S / STEP_S)):
         now_s = index * STEP_S
         air = room.air
-        reading = thermostat.read(air)
+        temperature = thermostat.read(air)
         in_outage = faults.controller_outage is not None and faults.controller_outage[0] <= now_s < faults.controller_outage[1]
-        if controller is not None and not in_outage:
+        if runner is not None and not in_outage:
+            if runner.mode is Mode.OBSERVE and now_s >= takeover_s:
+                runner.set_mode(Mode.ACTIVE)
             gap = faults.reading_gap is not None and faults.reading_gap[0] <= now_s < faults.reading_gap[1]
-            seen = None if gap else reading
-            decision = controller.step(now_s, seen, environment.buffer_setpoint)
-            result.statuses.add(decision.status)
-            duty_sum += decision.duty
-            duty_count += 1
-            if decision.setpoint != watchdog.commanded:
-                watchdog.command(now_s, decision.setpoint)
-                writes += _write(thermostat, decision.setpoint, faults, rng)
-            verdict = watchdog.check(now_s, thermostat.setpoint, thermostat.heating, seen)
-            if verdict is not WatchdogResult.OK:
-                result.resends += 1
-                result.alerts += verdict is WatchdogResult.ALERT
-                watchdog.command(now_s, decision.setpoint)
-                writes += _write(thermostat, decision.setpoint, faults, rng)
-            if thermostat.setpoint != watchdog.commanded:
+            step = runner.step(
+                now_s,
+                ThermostatReading(
+                    temperature=None if gap else temperature,
+                    setpoint=thermostat.setpoint,
+                    hvac_mode="heat",
+                    hvac_action="heating" if thermostat.heating else "idle",
+                    hvac_modes=("off", "heat"),
+                ),
+                environment.buffer_setpoint,
+            )
+            result.statuses.add(step.decision.status)
+            result.resends = step.resends
+            result.alerts += Problem.THERMOSTAT_NOT_FOLLOWING in step.problems
+            if now_s >= takeover_s:
+                duty_sum += step.decision.duty
+                duty_count += 1
+            for command in step.commands:
+                if command.kind is CommandKind.SET_TEMPERATURE and rng.random() >= faults.lost_write_probability:
+                    thermostat.setpoint = command.temperature
+            if runner.commanded is not None and thermostat.setpoint != runner.commanded:
                 result.wrong_setpoint_s += STEP_S
         relay = thermostat.step(air)
         flow = actuator.step(STEP_S, relay)
@@ -152,8 +180,9 @@ def simulate(
         if result.reached_target_s is None and room.air >= target - band:
             result.reached_target_s = now_s
         if now_s < settle_s:
-            first_days_high = max(first_days_high, room.air)
-            writes_at_settle = writes
+            if now_s >= takeover_s:
+                first_days_high = max(first_days_high, room.air)
+            writes_at_settle = step.writes if runner is not None and not in_outage else writes_at_settle
             continue
         samples.append(room.air)
         floors.append(room.floor)
@@ -164,6 +193,7 @@ def simulate(
 
     span_days = days - settle_days
     count = len(samples)
+    writes = step.writes if runner is not None else 0
     result.within_band_pct = sum(1 for value in samples if abs(value - target) <= band) / count * 100.0
     result.rms = math.sqrt(sum((value - target) ** 2 for value in samples) / count)
     result.low = min(samples)
@@ -179,9 +209,3 @@ def simulate(
     result.floor_swing = max(floors) - min(floors)
     result.final_air = room.air
     return result
-
-
-def _write(thermostat: Thermostat, setpoint: float, faults: Faults, rng: random.Random) -> int:
-    if rng.random() >= faults.lost_write_probability:
-        thermostat.setpoint = setpoint
-    return 1

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
 
 from .cycle import CycleConfig, CycleScheduler
@@ -67,6 +67,7 @@ class ZoneController:
         start_s: float = 0.0,
     ) -> None:
         self._config = config or ZoneConfig()
+        self._valve = self._config.valve
         self._target = self._config.target
         self._filter = ExponentialFilter(self._config.smoothing_s)
         self._pid = PidController(self._config.pid, integral)
@@ -84,9 +85,40 @@ class ZoneController:
     def target(self, value: float) -> None:
         self._target = value
 
+    @property
+    def integral(self) -> float:
+        """Return the integral term in percent."""
+        return self._pid.integral
+
+    @integral.setter
+    def integral(self, value: float) -> None:
+        self._pid.integral = value
+
+    def set_device_limits(
+        self,
+        device_min: float | None = None,
+        device_max: float | None = None,
+        setpoint_step: float | None = None,
+    ) -> None:
+        """Use the limits the device reports. Missing values keep their current setting."""
+        self._valve = replace(
+            self._valve,
+            device_min=self._valve.device_min if device_min is None else device_min,
+            device_max=self._valve.device_max if device_max is None else device_max,
+            setpoint_step=self._valve.setpoint_step if not setpoint_step else setpoint_step,
+        )
+
     def snapshot(self) -> dict[str, float]:
         """Return the state worth keeping across a restart."""
         return {"integral": self._pid.integral, "carry_s": self._cycle.carry_s}
+
+    def gain_scale(self, temperature: float, buffer_temperature: float | None) -> float:
+        """Return the factor that converts required power into valve duty."""
+        config = self._config
+        if buffer_temperature is None:
+            return 1.0
+        delta = buffer_temperature - temperature - config.floor_offset
+        return config.reference_water_delta / max(config.min_water_delta, delta)
 
     def step(
         self,
@@ -106,22 +138,15 @@ class ZoneController:
         error = self._target - temperature
         # Outside the setpoint band the thermostat acts on its own, so the controller's
         # output has no effect and must not build up in the integral.
-        in_control = abs(error) <= config.valve.authority
+        in_control = abs(error) <= self._valve.authority
         output = self._pid.update(
             error,
             min(dt_s, config.max_integration_step_s) if in_control else 0.0,
             feedforward,
-            self._gain_scale(temperature, buffer_temperature),
+            self.gain_scale(temperature, buffer_temperature),
         )
         self._duty = output.duty
         return self._drive(now_s, ZoneStatus.NORMAL)
-
-    def _gain_scale(self, temperature: float, buffer_temperature: float | None) -> float:
-        config = self._config
-        if buffer_temperature is None:
-            return 1.0
-        delta = buffer_temperature - temperature - config.floor_offset
-        return config.reference_water_delta / max(config.min_water_delta, delta)
 
     def _without_reading(self, now_s: float) -> ZoneDecision:
         config = self._config
@@ -135,8 +160,7 @@ class ZoneController:
 
     def _drive(self, now_s: float, status: ZoneStatus) -> ZoneDecision:
         is_open = self._cycle.step(now_s, self._duty)
-        valve = self._config.valve
-        setpoint = open_setpoint(self._target, valve) if is_open else closed_setpoint(self._target, valve)
+        setpoint = open_setpoint(self._target, self._valve) if is_open else closed_setpoint(self._target, self._valve)
         return ZoneDecision(status, setpoint, is_open, self._duty, self._filter.value, self._pid.integral)
 
     def _handback(self, status: ZoneStatus) -> ZoneDecision:

@@ -1,0 +1,205 @@
+import unittest
+
+from custom_components.what_the_heat.core.runner import (
+    Command,
+    CommandKind,
+    Mode,
+    Problem,
+    RunnerConfig,
+    ThermostatReading,
+    ZoneRunner,
+)
+from custom_components.what_the_heat.core.zone import ZoneConfig, ZoneStatus
+
+MINUTE = 60.0
+HOUR = 3600.0
+TARGET = 21.0
+
+
+def runner(mode: Mode = Mode.ACTIVE, **kwargs) -> ZoneRunner:
+    return ZoneRunner(RunnerConfig(zone=ZoneConfig(target=TARGET)), mode, **kwargs)
+
+
+def reading(temperature: float | None = 20.0, setpoint: float | None = 19.0, **kwargs) -> ThermostatReading:
+    defaults = {"hvac_mode": "heat", "hvac_action": "idle", "hvac_modes": ("off", "heat")}
+    return ThermostatReading(temperature, setpoint, **{**defaults, **kwargs})
+
+
+class ObserveModeTest(unittest.TestCase):
+    def test_never_writes(self) -> None:
+        zone = runner(Mode.OBSERVE)
+        for minute in range(600):
+            step = zone.step(minute * MINUTE, reading(temperature=18.0, setpoint=15.0, hvac_mode="off"))
+            self.assertEqual(step.commands, ())
+        self.assertEqual(step.writes, 0)
+
+    def test_still_calculates(self) -> None:
+        step = runner(Mode.OBSERVE).step(0.0, reading(temperature=19.0))
+        self.assertGreater(step.decision.duty, 0.0)
+        self.assertTrue(step.decision.valve_open)
+
+
+class ActiveModeTest(unittest.TestCase):
+    def test_cold_room_gets_the_open_setpoint(self) -> None:
+        step = runner().step(0.0, reading(temperature=20.0, setpoint=15.0))
+        self.assertEqual(step.commands, (Command(CommandKind.SET_TEMPERATURE, 23.0),))
+        self.assertEqual(step.writes, 1)
+
+    def test_warm_room_gets_the_closed_setpoint(self) -> None:
+        step = runner().step(0.0, reading(temperature=22.0, setpoint=15.0))
+        self.assertEqual(step.commands, (Command(CommandKind.SET_TEMPERATURE, 19.0),))
+
+    def test_no_write_when_the_device_already_has_the_setpoint(self) -> None:
+        step = runner().step(0.0, reading(temperature=22.0, setpoint=19.0))
+        self.assertEqual(step.commands, ())
+        self.assertEqual(step.writes, 0)
+
+    def test_setpoint_is_written_once_per_change(self) -> None:
+        zone = runner()
+        total = 0
+        for minute in range(30):
+            step = zone.step(minute * MINUTE, reading(temperature=20.0, setpoint=23.0, hvac_action="heating"))
+            total += len(step.commands)
+        self.assertEqual(total, 0)
+
+    def test_nothing_is_written_before_the_first_reading(self) -> None:
+        step = runner().step(0.0, reading(temperature=None, setpoint=19.0))
+        self.assertIs(step.decision.status, ZoneStatus.INITIALIZING)
+        self.assertEqual(step.commands, ())
+
+    def test_unavailable_thermostat_gets_no_commands(self) -> None:
+        step = runner().step(0.0, ThermostatReading())
+        self.assertEqual(step.commands, ())
+
+    def test_lost_command_is_sent_again(self) -> None:
+        zone = runner()
+        zone.step(0.0, reading(temperature=20.0, setpoint=15.0))
+        step = zone.step(2 * MINUTE, reading(temperature=20.0, setpoint=15.0))
+        self.assertEqual(step.commands, (Command(CommandKind.SET_TEMPERATURE, 23.0),))
+        self.assertEqual(step.resends, 1)
+
+    def test_repeated_mismatches_raise_a_problem_that_clears(self) -> None:
+        zone = runner()
+        now = 0.0
+        zone.step(now, reading(temperature=20.0, setpoint=15.0))
+        for _ in range(3):
+            now += 2 * MINUTE
+            step = zone.step(now, reading(temperature=20.0, setpoint=15.0))
+        self.assertIn(Problem.THERMOSTAT_NOT_FOLLOWING, step.problems)
+        now += 2 * MINUTE
+        step = zone.step(now, reading(temperature=20.0, setpoint=23.0, hvac_action="heating"))
+        self.assertNotIn(Problem.THERMOSTAT_NOT_FOLLOWING, step.problems)
+
+    def test_thermostat_that_is_off_gets_switched_on(self) -> None:
+        step = runner().step(0.0, reading(temperature=20.0, setpoint=23.0, hvac_mode="off", hvac_action="off"))
+        self.assertIn(Command(CommandKind.SET_HEAT_MODE), step.commands)
+
+    def test_thermostat_that_is_off_without_a_setpoint_gets_switched_on(self) -> None:
+        step = runner().step(0.0, reading(temperature=20.0, setpoint=None, hvac_mode="off", hvac_action="off"))
+        self.assertEqual(
+            step.commands,
+            (Command(CommandKind.SET_HEAT_MODE), Command(CommandKind.SET_TEMPERATURE, 23.0)),
+        )
+
+    def test_heat_mode_command_is_rate_limited(self) -> None:
+        zone = runner()
+        off = reading(temperature=20.0, setpoint=23.0, hvac_mode="off", hvac_action="off")
+        zone.step(0.0, off)
+        step = zone.step(MINUTE, off)
+        self.assertNotIn(Command(CommandKind.SET_HEAT_MODE), step.commands)
+        step = zone.step(5 * MINUTE, off)
+        self.assertIn(Command(CommandKind.SET_HEAT_MODE), step.commands)
+
+    def test_summer_mode_thermostat_is_left_alone(self) -> None:
+        cooling_only = reading(temperature=20.0, setpoint=15.0, hvac_mode="cool", hvac_modes=("off", "cool"))
+        step = runner().step(0.0, cooling_only)
+        self.assertEqual(step.commands, ())
+        self.assertIn(Problem.THERMOSTAT_CANNOT_HEAT, step.problems)
+
+    def test_device_limits_are_respected(self) -> None:
+        step = runner().step(0.0, reading(temperature=20.0, setpoint=15.0, max_temp=22.0, setpoint_step=0.5))
+        self.assertEqual(step.commands, (Command(CommandKind.SET_TEMPERATURE, 21.5),))
+
+    def test_buffer_over_the_limit_is_reported(self) -> None:
+        self.assertIn(Problem.BUFFER_OVER_LIMIT, runner().step(0.0, reading(), buffer_temperature=39.0).problems)
+        self.assertNotIn(Problem.BUFFER_OVER_LIMIT, runner().step(0.0, reading(), buffer_temperature=38.0).problems)
+
+    def test_missing_readings_hand_back_the_target(self) -> None:
+        zone = runner()
+        zone.step(0.0, reading(temperature=20.0, setpoint=23.0, hvac_action="heating"))
+        step = zone.step(HOUR, reading(temperature=None, setpoint=23.0))
+        self.assertIs(step.decision.status, ZoneStatus.HANDBACK)
+        self.assertIn(Problem.READINGS_MISSING, step.problems)
+        self.assertEqual(step.commands, (Command(CommandKind.SET_TEMPERATURE, TARGET),))
+
+    def test_target_change_moves_the_setpoint(self) -> None:
+        zone = runner()
+        zone.step(0.0, reading(temperature=20.0, setpoint=23.0, hvac_action="heating"))
+        zone.target = 21.5
+        step = zone.step(MINUTE, reading(temperature=20.0, setpoint=23.0, hvac_action="heating"))
+        self.assertEqual(step.commands, (Command(CommandKind.SET_TEMPERATURE, 23.5),))
+
+
+class HandbackModeTest(unittest.TestCase):
+    def test_target_is_written_once_and_the_thermostat_left_alone(self) -> None:
+        zone = runner(Mode.HANDBACK)
+        first = zone.step(0.0, reading(temperature=20.0, setpoint=23.0, hvac_action="heating"))
+        self.assertEqual(first.commands, (Command(CommandKind.SET_TEMPERATURE, TARGET),))
+        for minute in range(1, 100):
+            step = zone.step(minute * MINUTE, reading(temperature=20.0, setpoint=TARGET, hvac_action="heating"))
+            self.assertEqual(step.commands, ())
+
+    def test_thermostat_that_was_switched_off_stays_off(self) -> None:
+        step = runner(Mode.HANDBACK).step(0.0, reading(temperature=20.0, setpoint=TARGET, hvac_mode="off", hvac_action="off"))
+        self.assertNotIn(Command(CommandKind.SET_HEAT_MODE), step.commands)
+
+
+class ModeChangeTest(unittest.TestCase):
+    def _observed(self, temperature: float, heating_every: int) -> ZoneRunner:
+        zone = runner(Mode.OBSERVE)
+        for minute in range(60 * 48):
+            action = "heating" if minute % heating_every == 0 else "idle"
+            zone.step(minute * MINUTE, reading(temperature=temperature, setpoint=TARGET, hvac_action=action), 34.0)
+        return zone
+
+    def test_integral_starts_from_recent_heating_near_the_target(self) -> None:
+        zone = self._observed(TARGET, heating_every=4)
+        zone.set_mode(Mode.ACTIVE)
+        self.assertGreater(zone.snapshot()["integral"], 10.0)
+        self.assertLess(zone.snapshot()["integral"], 60.0)
+
+    def test_cold_room_starts_from_zero(self) -> None:
+        zone = self._observed(TARGET - 3.0, heating_every=1)
+        zone.set_mode(Mode.ACTIVE)
+        self.assertEqual(zone.snapshot()["integral"], 0.0)
+
+    def test_too_little_observation_starts_from_zero(self) -> None:
+        zone = runner(Mode.OBSERVE)
+        zone.step(0.0, reading(temperature=TARGET, setpoint=TARGET, hvac_action="heating"))
+        zone.set_mode(Mode.ACTIVE)
+        self.assertEqual(zone.snapshot()["integral"], 0.0)
+
+    def test_going_active_takes_over_from_the_thermostat(self) -> None:
+        zone = runner(Mode.OBSERVE)
+        zone.step(0.0, reading(temperature=20.0, setpoint=TARGET))
+        zone.set_mode(Mode.ACTIVE)
+        step = zone.step(MINUTE, reading(temperature=20.0, setpoint=TARGET))
+        self.assertEqual(step.commands, (Command(CommandKind.SET_TEMPERATURE, 23.0),))
+
+    def test_state_survives_a_restart(self) -> None:
+        zone = runner(Mode.ACTIVE, integral=33.0, writes=5)
+        state = zone.snapshot()
+        restored = ZoneRunner(
+            RunnerConfig(zone=ZoneConfig(target=state["target"])),
+            Mode(state["mode"]),
+            integral=state["integral"],
+            carry_s=state["carry_s"],
+            heating_share=state["heating_share"],
+            observed_s=state["observed_s"],
+            writes=state["writes"],
+        )
+        self.assertEqual(restored.snapshot(), state)
+
+
+if __name__ == "__main__":
+    unittest.main()
