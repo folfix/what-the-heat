@@ -43,7 +43,17 @@ from .const import (
     UPDATE_INTERVAL_S,
 )
 from .core.daily import DailyLog
-from .core.runner import Command, CommandKind, Mode, Problem, RunnerConfig, RunnerStep, ThermostatReading, ZoneRunner
+from .core.runner import (
+    Command,
+    CommandKind,
+    LearnedState,
+    Mode,
+    Problem,
+    RunnerConfig,
+    RunnerStep,
+    ThermostatReading,
+    ZoneRunner,
+)
 from .core.zone import ZoneConfig
 from .settings import GlobalSettings
 
@@ -68,6 +78,7 @@ class ZoneData:
     water: float
     outdoor: float | None
     today: dict[str, Any] | None
+    learned: LearnedState
 
 
 def merged_config(entry: ConfigEntry) -> dict[str, Any]:
@@ -151,6 +162,7 @@ class ZoneCoordinator(DataUpdateCoordinator[ZoneData]):
             heating_share=state.get("heating_share"),
             observed_s=state.get("observed_s", 0.0),
             writes=state.get("writes", 0),
+            learned_s=state.get("learned_s", 0.0),
         )
         self.log = DailyLog(**stored.get("log", {}))
 
@@ -203,7 +215,7 @@ class ZoneCoordinator(DataUpdateCoordinator[ZoneData]):
         if now_s - self._last_save_s >= SAVE_INTERVAL_S:
             self._last_save_s = now_s
             self._store.async_delay_save(self.snapshot, 1)
-        return ZoneData(step, reading, water, outdoor, self.log.today)
+        return ZoneData(step, reading, water, outdoor, self.log.today, self.runner.learned())
 
     def _read_outdoor(self) -> float | None:
         entity = self._config.get(CONF_OUTDOOR_ENTITY)
@@ -261,6 +273,12 @@ class ZoneCoordinator(DataUpdateCoordinator[ZoneData]):
         """Change the target temperature, and act on it right away."""
         LOGGER.info("%s: target %s -> %s", self._thermostat, self.runner.target, target)
         self.runner.target = target
+        await self._async_apply_change()
+
+    async def async_reset_learning(self) -> None:
+        """Forget what the room has learned, and act on it right away."""
+        LOGGER.info("%s: learning reset", self._thermostat)
+        self.runner.reset_learning()
         await self._async_apply_change()
 
     async def _async_apply_change(self) -> None:

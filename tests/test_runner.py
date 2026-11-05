@@ -186,7 +186,7 @@ class ModeChangeTest(unittest.TestCase):
         self.assertEqual(step.commands, (Command(CommandKind.SET_TEMPERATURE, OPEN),))
 
     def test_state_survives_a_restart(self) -> None:
-        zone = runner(Mode.ACTIVE, integral=33.0, writes=5)
+        zone = runner(Mode.ACTIVE, integral=33.0, writes=5, learned_s=7200.0)
         state = zone.snapshot()
         restored = ZoneRunner(
             RunnerConfig(zone=ZoneConfig(target=state["target"])),
@@ -196,8 +196,139 @@ class ModeChangeTest(unittest.TestCase):
             heating_share=state["heating_share"],
             observed_s=state["observed_s"],
             writes=state["writes"],
+            learned_s=state["learned_s"],
         )
         self.assertEqual(restored.snapshot(), state)
+
+
+class LearningTest(unittest.TestCase):
+    def _run(self, zone: ZoneRunner, hours: float, temperature: float, water: float = 34.0, start_s: float = 0.0) -> None:
+        for minute in range(int(hours * 60) + 1):
+            zone.step(start_s + minute * MINUTE, reading(temperature=temperature, setpoint=TARGET), water)
+
+    def test_nothing_is_known_at_first(self) -> None:
+        learned = runner().learned()
+        self.assertIsNone(learned.demand)
+        self.assertEqual(learned.hours, 0.0)
+        self.assertIsNone(learned.recent_heating)
+
+    def test_demand_comes_from_the_controller_while_active(self) -> None:
+        zone = runner(Mode.ACTIVE, integral=30.0, learned_s=7 * HOUR)
+        zone.step(0.0, reading(temperature=TARGET), 34.0)
+        learned = zone.learned()
+        self.assertEqual(learned.source, "controller")
+        self.assertAlmostEqual(learned.demand, 30.0)
+        self.assertAlmostEqual(learned.hours, 7.0)
+
+    def test_colder_water_needs_a_longer_opening(self) -> None:
+        zone = runner(Mode.ACTIVE, integral=30.0, learned_s=7 * HOUR)
+        zone.step(0.0, reading(temperature=TARGET), 28.0)
+        self.assertAlmostEqual(zone.learned().demand, 75.0)
+
+    def test_demand_never_exceeds_a_fully_open_valve(self) -> None:
+        zone = runner(Mode.ACTIVE, integral=60.0, learned_s=7 * HOUR)
+        zone.step(0.0, reading(temperature=TARGET), 28.0)
+        self.assertEqual(zone.learned().demand, 100.0)
+
+    def test_a_short_time_is_not_enough_to_show_a_demand(self) -> None:
+        zone = runner(Mode.ACTIVE, integral=30.0, learned_s=5 * HOUR)
+        zone.step(0.0, reading(temperature=TARGET), 34.0)
+        self.assertIsNone(zone.learned().demand)
+
+    def test_time_counts_while_the_controller_can_adjust_its_demand(self) -> None:
+        zone = runner(Mode.ACTIVE)
+        self._run(zone, 2.0, TARGET - 0.1)
+        self.assertAlmostEqual(zone.learned().hours, 2.0)
+
+    def test_a_cold_room_teaches_nothing(self) -> None:
+        # Outside the setpoint band the thermostat acts on its own.
+        zone = runner(Mode.ACTIVE)
+        self._run(zone, 8.0, TARGET - 3.0)
+        self.assertEqual(zone.learned().hours, 0.0)
+        self.assertIsNone(zone.learned().demand)
+
+    def test_time_with_a_saturated_output_teaches_nothing(self) -> None:
+        zone = runner(Mode.ACTIVE)
+        self._run(zone, 8.0, TARGET - 1.5)
+        self.assertEqual(zone.learned().hours, 0.0)
+
+    def test_a_long_gap_does_not_count_as_learning(self) -> None:
+        zone = runner(Mode.ACTIVE)
+        zone.step(0.0, reading(temperature=TARGET - 0.1), 34.0)
+        zone.step(10 * HOUR, reading(temperature=TARGET - 0.1), 34.0)
+        self.assertLess(zone.learned().hours, 0.1)
+
+    def test_observing_uses_what_the_thermostat_has_been_doing(self) -> None:
+        zone = runner(Mode.OBSERVE)
+        for minute in range(60 * 48):
+            action = "heating" if minute % 4 == 0 else "idle"
+            zone.step(minute * MINUTE, reading(temperature=TARGET, setpoint=TARGET, hvac_action=action), 34.0)
+        learned = zone.learned()
+        self.assertEqual(learned.source, "thermostat")
+        self.assertGreater(learned.demand, 20.0)
+        self.assertLess(learned.demand, 40.0)
+        self.assertAlmostEqual(learned.recent_heating, learned.demand)
+        self.assertAlmostEqual(learned.hours, 48.0, delta=0.1)
+
+    def test_observing_a_cold_room_shows_no_demand(self) -> None:
+        zone = runner(Mode.OBSERVE)
+        self._run(zone, 8.0, TARGET - 3.0)
+        self.assertIsNone(zone.learned().demand)
+        self.assertAlmostEqual(zone.learned().hours, 8.0)
+
+    def test_taking_over_keeps_what_was_seen_of_the_thermostat(self) -> None:
+        zone = runner(Mode.OBSERVE)
+        for minute in range(60 * 48):
+            action = "heating" if minute % 4 == 0 else "idle"
+            zone.step(minute * MINUTE, reading(temperature=TARGET, setpoint=TARGET, hvac_action=action), 34.0)
+        seen = zone.learned().demand
+        zone.set_mode(Mode.ACTIVE)
+        learned = zone.learned()
+        self.assertEqual(learned.source, "controller")
+        self.assertAlmostEqual(learned.demand, seen)
+        self.assertAlmostEqual(learned.hours, 48.0, delta=0.1)
+
+    def test_taking_over_a_cold_room_starts_from_nothing(self) -> None:
+        zone = runner(Mode.OBSERVE, learned_s=9 * HOUR)
+        self._run(zone, 8.0, TARGET - 3.0)
+        zone.set_mode(Mode.ACTIVE)
+        self.assertEqual(zone.learned().hours, 0.0)
+
+    def test_reset_forgets_everything_learned(self) -> None:
+        zone = runner(Mode.ACTIVE, integral=40.0, carry_s=120.0, heating_share=0.5, observed_s=9 * HOUR, learned_s=9 * HOUR)
+        zone.reset_learning()
+        state = zone.snapshot()
+        self.assertEqual(state["integral"], 0.0)
+        self.assertEqual(state["carry_s"], 0.0)
+        self.assertIsNone(state["heating_share"])
+        self.assertEqual(state["observed_s"], 0.0)
+        self.assertEqual(state["learned_s"], 0.0)
+        self.assertIsNone(zone.learned().demand)
+
+    def test_reset_keeps_the_mode_target_and_counters(self) -> None:
+        zone = runner(Mode.ACTIVE, integral=40.0, writes=5)
+        before = zone.snapshot()
+        zone.reset_learning()
+        after = zone.snapshot()
+        for key in ("mode", "target", "writes"):
+            self.assertEqual(after[key], before[key])
+
+    def test_reset_while_observing_writes_nothing(self) -> None:
+        zone = runner(Mode.OBSERVE, integral=40.0)
+        zone.step(0.0, reading(temperature=TARGET))
+        zone.reset_learning()
+        step = zone.step(MINUTE, reading(temperature=TARGET))
+        self.assertEqual(step.commands, ())
+
+    def test_after_a_reset_the_room_learns_again(self) -> None:
+        zone = runner(Mode.ACTIVE, integral=40.0, learned_s=9 * HOUR)
+        self._run(zone, 1.0, TARGET)
+        zone.reset_learning()
+        self._run(zone, 7.0, TARGET - 0.2, start_s=2 * HOUR)
+        learned = zone.learned()
+        self.assertAlmostEqual(learned.hours, 7.0, delta=0.1)
+        self.assertGreater(learned.demand, 0.0)
+        self.assertLess(learned.demand, 40.0)
 
 
 if __name__ == "__main__":

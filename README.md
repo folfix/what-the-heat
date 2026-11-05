@@ -41,20 +41,26 @@ Keep it within about 2 °C of the real value. In simulation that barely changes 
 
 If a room stays at 100% and below its target, the water cannot deliver enough heat for it. The integration cannot fix that, so the temperature has to be raised by hand, on the valves and in the setting.
 
+### What a room learns so far
+
+One thing: its steady demand, meaning how much of the time the valve must be open to hold the target. The controller works this out while it is in charge. Before that, the integration watches how much the thermostat heats on its own. The value appears after about 6 hours of data near the target, as the **Learned demand** sensor and on the **What the Heat** page.
+
+**Reset learning** clears this when something unusual has misled the controller. The mode, the target and the daily measurements stay. The room needs time to learn again, so expect a temporary dip while the valve stays closed for longer. In simulated rooms the lowest temperature fell by 0.5 to 1.5 °C in most cases, and the room spent up to about half a day outside ±0.3 °C, or about 2.5 days in the slowest case.
+
 ### Not there yet
 
-Prediction from the weather forecast and per-room learning are designed and simulated, but not implemented. See the [specification](docs/specification.md).
+Prediction from the weather forecast and the rest of per-room learning, such as losses, sun exposure and recurring gains, are designed and simulated, but not implemented. See the [specification](docs/specification.md).
 
 ### Where to see it
 
-- **Sidebar:** the **What the Heat** page shows all rooms as tiles, where you can change the target and the mode.
+- **Sidebar:** the **What the Heat** page shows all rooms as tiles, where you can change the target and the mode, see what a room has learned and reset it.
 - **Dashboards:** each room has a thermostat entity for a regular tile or thermostat card, along with separate sensors.
 - **Diagnostics:** the file you can download on the device page contains one row per day.
 - **Logs:** see the [pilot test guide](docs/pilot-test.md).
 
 ## Status
 
-Early development, ready for a first test on one room. So far it has PI control and valve cycles only, without prediction or learning. It runs on a real thermostat in a first test, and has otherwise been tested against simulated rooms and a stand-in thermostat. Figures in the specification come from simulations with assumed room data and have not been verified in a real house.
+Early development, ready for a first test on one room. So far it has PI control and valve cycles only, without prediction, and it learns only each room's steady demand. It runs on a real thermostat in a first test, and has otherwise been tested against simulated rooms and a stand-in thermostat. Figures in the specification come from simulations with assumed room data and have not been verified in a real house.
 
 - [Pilot test](docs/pilot-test.md): installation and how to run the test.
 - [Specification](docs/specification.md): requirements, architecture, parameters, simulation results and the roadmap.

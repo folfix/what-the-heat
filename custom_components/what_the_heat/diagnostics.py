@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import asdict
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -16,6 +17,7 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: ConfigE
     return {
         "config": merged_config(entry),
         "runner": coordinator.runner.snapshot(),
+        "learned": asdict(coordinator.runner.learned()),
         "today": coordinator.log.today,
         "days": coordinator.log.rows,
     }

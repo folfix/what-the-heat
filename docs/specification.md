@@ -252,6 +252,8 @@ Each room is one configuration entry. The integration exposes the target, duty, 
 
 On switching from `observe` to `active`, the integral starts from how much the thermostat has recently been heating, but only if the room is near its target. Otherwise it starts from zero.
 
+Until the learning of 6.7 exists, what a room has learned is its steady demand. The `Learned demand` sensor and the sidebar page show it as the valve opening needed at the current water temperature, once at least 6 hours of data are behind it. While `active` it comes from the integral, and only time when the integral could move counts as data, so a cold room warming at full duty learns nothing. Otherwise it comes from the heating share of the thermostat, if the room is near its target. A `Reset learning` button clears the integral, the carried on-time, the heating share and the data counters. It keeps the mode, the target, the counters of writes and the daily rows, which are measurements and not learned. In simulation a reset of a settled room at 34 °C or 38 °C water lowered the minimum by 0.4 to 1.6 °C, and cost 3 to 15 extra hours outside ±0.3 °C in most rooms. The worst cases were a room with high losses at 34 °C with 31 hours, and a room with heavy air at 30 °C with 60 hours.
+
 ```
 custom_components/what_the_heat/
   core/          pure Python, no Home Assistant imports
@@ -411,7 +413,7 @@ Where it holds, stable water keeps most of these rooms within about ±0.15 °C. 
 
 A real test on one closed basement room, chosen for its small outside influence, at a target of 21 °C. The steps are in the [pilot test guide](pilot-test.md).
 
-- Only PID and cycles run. There is no prediction or learning yet, but daily rows are logged from the first day.
+- Only PID and cycles run. There is no prediction, and only the steady demand is learned, but daily rows are logged from the first day.
 - The mixing valves stay at a constant temperature during comparisons, with the same value in the global setting. Other rooms remain on their own thermostats.
 - Sequence: a plain thermostat baseline at 21 °C, then `observe` mode, then `active` mode. The first days after a cold room starts warming are not used for comparison. Cold start can be tested later by switching the room off for a few days.
 - Measured: time within ±0.3 °C, RMS deviation, longest closed period, setpoint writes per day, watchdog events, and whether the relay follows commands.

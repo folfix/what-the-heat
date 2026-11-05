@@ -54,6 +54,10 @@ class CycleScheduler:
         """Return the on-time carried over to the next cycle, in seconds."""
         return self._carry_s
 
+    def reset_carry(self) -> None:
+        """Forget the on-time owed from earlier cycles. The running cycle carries on."""
+        self._carry_s = 0.0
+
     def step(self, now_s: float, duty_percent: float) -> bool:
         """Return True if the valve should be open at now_s."""
         if now_s >= self._cycle_end_s or self._demand_interrupts(now_s, duty_percent):

@@ -70,6 +70,16 @@ class PilotRoomTest(unittest.TestCase):
                 self.assertGreaterEqual(result.within_band_pct, 90.0)
                 self.assertLess(result.first_days_high, TARGET + 0.6)
 
+    def test_a_reset_costs_a_temporary_dip_and_the_room_recovers(self) -> None:
+        for label, (parameters, ground) in ROOMS.items():
+            environment = Environment(water_setpoint=34.0, ground=ground)
+            for hour in (0, 9, 17):
+                with self.subTest(room=label, hour=hour):
+                    result = simulate(parameters, environment, TARGET, reset_learning_at_s=6.5 * DAY_S + hour * 3600.0)
+                    self.assertGreater(result.low, TARGET - 2.0)
+                    self.assertLess(result.high, TARGET + 1.0)
+                    self.assertLess(abs(result.final_air - TARGET), 0.4)
+
     def test_small_error_in_the_assumed_water_is_tolerated(self) -> None:
         for label, (parameters, ground) in ROOMS.items():
             for error in (-2.0, 2.0):

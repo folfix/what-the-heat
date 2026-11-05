@@ -104,13 +104,15 @@ def simulate(
     band: float = 0.3,
     observe_days: float = 0.0,
     assumed_water: float | None = None,
+    reset_learning_at_s: float | None = None,
 ) -> Result:
     """Run the room and return what happened after the settling period.
 
     With observe_days the room first runs on the plain thermostat, with the runner in
     observe mode, and the runner then takes over. In that case settle_days counts from
     the takeover. With assumed_water the controller believes in a water temperature
-    other than the real setpoint.
+    other than the real setpoint. With reset_learning_at_s the owner presses the reset
+    button at that moment.
     """
     faults = faults or Faults()
     rng = random.Random(faults.seed)
@@ -153,6 +155,9 @@ def simulate(
         if runner is not None and not in_outage:
             if runner.mode is Mode.OBSERVE and now_s >= takeover_s:
                 runner.set_mode(Mode.ACTIVE)
+            if reset_learning_at_s is not None and now_s >= reset_learning_at_s:
+                runner.reset_learning()
+                reset_learning_at_s = None
             gap = faults.reading_gap is not None and faults.reading_gap[0] <= now_s < faults.reading_gap[1]
             step = runner.step(
                 now_s,

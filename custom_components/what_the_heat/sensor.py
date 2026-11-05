@@ -33,6 +33,17 @@ class ZoneSensorDescription(SensorEntityDescription):
     """A sensor and how to get its value."""
 
     value: Callable[[ZoneData], Any]
+    attributes: Callable[[ZoneData], dict[str, Any]] | None = None
+
+
+def _learned_attributes(data: ZoneData) -> dict[str, Any]:
+    learned = data.learned
+    recent = learned.recent_heating
+    return {
+        "source": learned.source,
+        "learned_from_hours": round(learned.hours, 1),
+        "recent_heating_pct": None if recent is None else round(recent, 1),
+    }
 
 
 SENSORS = (
@@ -91,6 +102,14 @@ SENSORS = (
         value=_today("longest_closed_h"),
     ),
     ZoneSensorDescription(
+        key="learned_demand",
+        native_unit_of_measurement=PERCENTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=0,
+        value=lambda data: data.learned.demand,
+        attributes=_learned_attributes,
+    ),
+    ZoneSensorDescription(
         key="integral",
         entity_category=EntityCategory.DIAGNOSTIC,
         native_unit_of_measurement=PERCENTAGE,
@@ -147,3 +166,9 @@ class ZoneSensor(ZoneEntity, SensorEntity):
     def native_value(self) -> Any:
         """Return the current value."""
         return self.entity_description.value(self.coordinator.data)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        """Return the details behind the value, if there are any."""
+        attributes = self.entity_description.attributes
+        return None if attributes is None else attributes(self.coordinator.data)

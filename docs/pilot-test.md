@@ -4,7 +4,7 @@ How to run the first real test on one closed room. Background and criteria are i
 
 ## What runs in this test
 
-Only PID and cycles, with no prediction and no learning. The integration writes only to the room's thermostat, and only in `Active` mode. It neither reads nor changes the mixing valves, the buffer or the heat pump.
+Only PID and cycles, with no prediction. The only thing learned is each room's steady demand. The integration writes only to the room's thermostat, and only in `Active` mode. It neither reads nor changes the mixing valves, the buffer or the heat pump.
 
 ## 1. Install
 
@@ -60,10 +60,13 @@ The **What the Heat** page in the sidebar shows the main values for all rooms. E
 | Longest closed today | Longest continuous period without heating |
 | Heating today | Share of the day the relay was on |
 | Duty | The share of time the valve should be open |
+| Learned demand | The share of time the valve needs to be open to hold the target at the current water temperature. Empty until there are about 6 hours of data near the target. The attributes say how much data is behind it and where it comes from. |
 | Valve requested | What the controller wants right now |
 | Setpoint writes | Total number of writes to the thermostat |
 | Resent commands | Commands sent again by the watchdog |
 | Problem | On when something needs attention. The `reasons` attribute says what. |
+
+If something unusual has misled the controller, such as a long open window, use **Reset learning**, as a button on the device page or on the **What the Heat** page, where a second click confirms it. It clears the learned demand and keeps the mode, the target and the daily measurements. Expect the room to dip for a while as the controller learns again, so note the moment when comparing results.
 
 ## 6. Stopping
 

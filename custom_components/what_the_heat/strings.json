@@ -56,6 +56,9 @@
       "valve_requested": { "name": "Valve requested" },
       "problem": { "name": "Problem" }
     },
+    "button": {
+      "reset_learning": { "name": "Reset learning" }
+    },
     "climate": {
       "zone": {
         "state_attributes": {
@@ -99,6 +102,7 @@
       "rms_deviation_today": { "name": "RMS deviation today" },
       "heating_today": { "name": "Heating today" },
       "longest_closed_today": { "name": "Longest closed today" },
+      "learned_demand": { "name": "Learned demand" },
       "integral": { "name": "Integral" },
       "water_temperature": { "name": "Water temperature" },
       "setpoint_writes": { "name": "Setpoint writes" },

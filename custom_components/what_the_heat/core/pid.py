@@ -28,6 +28,7 @@ class PidOutput:
     integral: float
     feedforward: float
     duty: float
+    integrating: bool = False
 
 
 class PidController:
@@ -69,13 +70,14 @@ class PidController:
         proportional = self._config.kp * error
         raw = (proportional + self._integral + feedforward) * gain_scale
         saturated = (raw >= 100.0 and error > 0) or (raw <= 0.0 and error < 0)
-        if not saturated and dt_s > 0:
+        integrating = not saturated and dt_s > 0
+        if integrating:
             config = self._config
             rate = config.ki * (config.boost_factor if abs(error) > config.boost_error else 1.0)
             self._integral = self._clamp_integral(self._integral + rate * error * dt_s)
             raw = (proportional + self._integral + feedforward) * gain_scale
         duty = min(100.0, max(0.0, raw))
-        self._last = PidOutput(error, proportional, self._integral, feedforward, duty)
+        self._last = PidOutput(error, proportional, self._integral, feedforward, duty, integrating)
         return self._last
 
     def _clamp_integral(self, value: float) -> float:

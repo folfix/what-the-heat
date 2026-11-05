@@ -73,8 +73,25 @@ class RunnerConfig:
     heat_mode_retry_s: float = 5 * 60.0
     heat_mode_attempts: int = 3
     heating_share_time_constant_s: float = 24 * 3600.0
-    seed_min_observed_s: float = 6 * 3600.0
+    min_learning_s: float = 6 * 3600.0
     seed_max_error: float = 0.5
+
+
+@dataclass(frozen=True)
+class LearnedState:
+    """What a room has learned so far, for showing to the owner.
+
+    `demand` is the share of time, in percent, that the valve must be open to hold the
+    target at the current water temperature, or None without enough data. `source` says
+    where it comes from: "controller" while it is in charge, otherwise "thermostat", from
+    what the thermostat has been doing on its own. `hours` is how much data is behind it,
+    and `recent_heating` the percentage of about the last day that the relay was on.
+    """
+
+    demand: float | None
+    source: str
+    hours: float
+    recent_heating: float | None
 
 
 @dataclass(frozen=True)
@@ -109,6 +126,7 @@ class ZoneRunner:
         heating_share: float | None = None,
         observed_s: float = 0.0,
         writes: int = 0,
+        learned_s: float = 0.0,
     ) -> None:
         self._config = config or RunnerConfig()
         self._mode = mode
@@ -118,6 +136,7 @@ class ZoneRunner:
         if heating_share is not None:
             self._heating_share.update(heating_share, 0.0)
         self._observed_s = observed_s
+        self._learned_s = learned_s
         self._writes = writes
         self._resends = 0
         self._last_step_s: float | None = None
@@ -150,11 +169,35 @@ class ZoneRunner:
         if mode is self._mode:
             return
         if mode is Mode.ACTIVE:
-            self._controller.integral = self._seed_integral()
+            seed = self._observed_integral()
+            self._controller.integral = 0.0 if seed is None else seed
+            self._learned_s = 0.0 if seed is None else self._observed_s
         self._mode = mode
         self._watchdog = ValveWatchdog(self._config.watchdog)
         self._heat_mode_tries = 0
         self._next_heat_mode_s = 0.0
+
+    def reset_learning(self) -> None:
+        """Forget what was learned about the room. The mode, target and counters stay."""
+        self._controller.reset_learning()
+        self._heating_share.reset()
+        self._observed_s = 0.0
+        self._learned_s = 0.0
+
+    def learned(self) -> LearnedState:
+        """Return what the room has learned so far."""
+        config = self._config
+        share = self._heating_share.value
+        recent = share * 100.0 if share is not None and self._observed_s >= config.min_learning_s else None
+        if self._mode is Mode.ACTIVE:
+            integral, source, seconds = self._controller.integral, "controller", self._learned_s
+        else:
+            integral, source, seconds = self._observed_integral(), "thermostat", self._observed_s
+        demand = None
+        if integral is not None and seconds >= config.min_learning_s:
+            scale = self._controller.gain_scale(self._controller.target, self._last_water)
+            demand = min(100.0, integral * scale)
+        return LearnedState(demand, source, seconds / 3600.0, recent)
 
     def snapshot(self) -> dict[str, float | str | None]:
         """Return the state worth keeping across a restart."""
@@ -163,6 +206,7 @@ class ZoneRunner:
             "target": self._controller.target,
             "heating_share": self._heating_share.value,
             "observed_s": self._observed_s,
+            "learned_s": self._learned_s,
             "writes": self._writes,
             **self._controller.snapshot(),
         }
@@ -180,6 +224,8 @@ class ZoneRunner:
         self._controller.set_device_limits(reading.min_temp, reading.max_temp, reading.setpoint_step)
         decision = self._controller.step(now_s, reading.temperature, water_temperature)
         self._track_heating(reading, water_temperature, dt_s)
+        if self._mode is Mode.ACTIVE and decision.learning:
+            self._learned_s += min(dt_s, self._config.zone.max_integration_step_s)
 
         problems: set[Problem] = set()
         if decision.status in (ZoneStatus.DEGRADED, ZoneStatus.HANDBACK):
@@ -207,14 +253,15 @@ class ZoneRunner:
         if water_temperature is not None:
             self._last_water = water_temperature
 
-    def _seed_integral(self) -> float:
+    def _observed_integral(self) -> float | None:
+        """Return the integral matching what the thermostat has been doing, if that says anything."""
         config = self._config
         share = self._heating_share.value
         temperature = self._last_temperature
-        if share is None or temperature is None or self._observed_s < config.seed_min_observed_s:
-            return 0.0
+        if share is None or temperature is None or self._observed_s < config.min_learning_s:
+            return None
         if abs(self._controller.target - temperature) > config.seed_max_error:
-            return 0.0
+            return None
         return share * 100.0 / self._controller.gain_scale(temperature, self._last_water)
 
     def _drive_thermostat(

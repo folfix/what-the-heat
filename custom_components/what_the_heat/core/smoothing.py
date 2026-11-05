@@ -19,6 +19,10 @@ class ExponentialFilter:
         """Return the filtered value, or None before the first sample."""
         return self._value
 
+    def reset(self) -> None:
+        """Forget everything seen so far."""
+        self._value = None
+
     def update(self, sample: float, dt_s: float) -> float:
         """Add a sample taken dt_s seconds after the previous one and return the new value."""
         if self._value is None or self._time_constant_s == 0:

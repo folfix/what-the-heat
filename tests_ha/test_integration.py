@@ -49,6 +49,8 @@ PROBLEM = "binary_sensor.pilot_problem"
 VALVE = "binary_sensor.pilot_valve_requested"
 WRITES = "sensor.pilot_setpoint_writes"
 IN_BAND = "sensor.pilot_time_in_band_today"
+LEARNED = "sensor.pilot_learned_demand"
+RESET = "button.pilot_reset_learning"
 FORM = {CONF_TARGET: 21.0, CONF_PHASE_OFFSET: 0}
 
 
@@ -516,6 +518,98 @@ async def test_saved_state_is_restored(hass: HomeAssistant, hass_storage, set_te
     assert int(hass.states.get(WRITES).state) >= 7
 
 
+async def add_room_that_has_learned(hass: HomeAssistant, hass_storage) -> MockConfigEntry:
+    """A room at its target, with 8 hours of data behind an integral of 42."""
+    set_thermostat(hass, temperature=21.0, setpoint=24.0, action="heating")
+    entry = room_entry()
+    entry.add_to_hass(hass)
+    hass_storage[f"{DOMAIN}.{entry.entry_id}"] = {
+        "version": 1,
+        "minor_version": 1,
+        "key": f"{DOMAIN}.{entry.entry_id}",
+        "data": {
+            "runner": {
+                "mode": "active",
+                "target": 21.0,
+                "integral": 42.0,
+                "carry_s": 60.0,
+                "heating_share": 0.4,
+                "observed_s": 86400.0,
+                "learned_s": 8 * 3600.0,
+                "writes": 7,
+            },
+            "log": {"rows": [{"date": "2026-11-01", "writes": 3}], "current": None},
+        },
+    }
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    return entry
+
+
+async def press_reset(hass: HomeAssistant) -> None:
+    await hass.services.async_call("button", "press", {"entity_id": RESET}, blocking=True)
+    await hass.async_block_till_done()
+
+
+async def test_new_room_has_learned_nothing(hass: HomeAssistant) -> None:
+    set_thermostat(hass)
+    await add_room(hass)
+    state = hass.states.get(LEARNED)
+    assert state.state == "unknown"
+    assert state.attributes["source"] == "thermostat"
+    assert state.attributes["learned_from_hours"] == 0.0
+    assert state.attributes["recent_heating_pct"] is None
+
+
+async def test_learned_demand_is_shown_with_its_details(hass: HomeAssistant, hass_storage, set_temperature_calls) -> None:
+    await add_room_that_has_learned(hass, hass_storage)
+    state = hass.states.get(LEARNED)
+    # 30 degree water with a target of 21 gives a scale of 10 / 6.
+    assert float(state.state) == pytest.approx(70.0, abs=0.5)
+    assert state.attributes["source"] == "controller"
+    assert state.attributes["learned_from_hours"] == pytest.approx(8.0, abs=0.1)
+    assert state.attributes["recent_heating_pct"] == pytest.approx(40.0, abs=1.0)
+
+
+async def test_reset_button_forgets_what_was_learned(hass: HomeAssistant, hass_storage, set_temperature_calls) -> None:
+    entry = await add_room_that_has_learned(hass, hass_storage)
+    await press_reset(hass)
+    state = entry.runtime_data.runner.snapshot()
+    assert state["integral"] == pytest.approx(0.0, abs=0.01)
+    assert state["carry_s"] == 0.0
+    assert state["observed_s"] < 60.0
+    assert state["learned_s"] < 60.0
+    assert hass.states.get(LEARNED).state == "unknown"
+    saved = hass_storage[f"{DOMAIN}.{entry.entry_id}"]["data"]["runner"]
+    assert saved["integral"] == pytest.approx(0.0, abs=0.01)
+
+
+async def test_reset_keeps_the_mode_target_measurements_and_setpoint(hass: HomeAssistant, hass_storage, set_temperature_calls) -> None:
+    entry = await add_room_that_has_learned(hass, hass_storage)
+    await press_reset(hass)
+    assert hass.states.get(MODE).state == "active"
+    assert float(hass.states.get(TARGET).state) == 21.0
+    assert int(hass.states.get(WRITES).state) >= 7
+    assert entry.runtime_data.log.rows == [{"date": "2026-11-01", "writes": 3}]
+    assert set_temperature_calls == []
+
+
+async def test_reset_survives_a_reload(hass: HomeAssistant, hass_storage, set_temperature_calls) -> None:
+    entry = await add_room_that_has_learned(hass, hass_storage)
+    await press_reset(hass)
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert entry.runtime_data.runner.snapshot()["integral"] == pytest.approx(0.0, abs=0.01)
+    assert hass.states.get(LEARNED).state == "unknown"
+
+
+async def test_reset_while_observing_writes_nothing(hass: HomeAssistant, set_temperature_calls) -> None:
+    set_thermostat(hass, temperature=20.0, setpoint=15.0)
+    await add_room(hass)
+    await press_reset(hass)
+    assert set_temperature_calls == []
+
+
 async def test_diagnostics_contain_the_daily_measurements(hass: HomeAssistant) -> None:
     set_thermostat(hass)
     hass.states.async_set(OUTDOOR, "4.2")
@@ -525,6 +619,7 @@ async def test_diagnostics_contain_the_daily_measurements(hass: HomeAssistant) -
     result = await async_get_config_entry_diagnostics(hass, entry)
     assert result["config"][CONF_THERMOSTAT] == THERMOSTAT
     assert result["runner"]["mode"] == "observe"
+    assert result["learned"]["source"] == "thermostat"
     assert result["today"]["date"] == dt_util.now().date().isoformat()
     assert result["today"]["outdoor_mean"] == 4.2
     assert result["today"]["water_mean"] == 30.0

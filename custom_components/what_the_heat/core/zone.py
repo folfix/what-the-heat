@@ -48,6 +48,7 @@ class ZoneDecision:
     duty: float
     temperature: float | None
     integral: float
+    learning: bool = False
 
 
 class ZoneController:
@@ -93,6 +94,11 @@ class ZoneController:
     @integral.setter
     def integral(self, value: float) -> None:
         self._pid.integral = value
+
+    def reset_learning(self) -> None:
+        """Forget the room's steady demand. The running cycle carries on."""
+        self._pid.integral = 0.0
+        self._cycle.reset_carry()
 
     def set_device_limits(
         self,
@@ -146,7 +152,7 @@ class ZoneController:
             self.gain_scale(temperature, water_temperature),
         )
         self._duty = output.duty
-        return self._drive(now_s, ZoneStatus.NORMAL)
+        return replace(self._drive(now_s, ZoneStatus.NORMAL), learning=output.integrating)
 
     def _without_reading(self, now_s: float) -> ZoneDecision:
         config = self._config

@@ -104,6 +104,10 @@
     .today { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
     .today b { display: block; font-size: 15px; font-weight: 500; font-variant-numeric: tabular-nums; }
     .today span { display: block; font-size: 11px; color: var(--secondary-text-color, #666); }
+    .learned { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .learned b { display: block; font-size: 15px; font-weight: 500; font-variant-numeric: tabular-nums; }
+    .learned span { display: block; font-size: 11px; color: var(--secondary-text-color, #666); }
+    .learned button { flex: none; min-height: 40px; padding: 4px 12px; font-size: 13px; }
     .modes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
     .modes button { min-height: 40px; padding: 4px; font-size: 13px; }
     .modes button.selected {
@@ -111,7 +115,7 @@
       border-color: var(--primary-color, #03a9f4);
       color: var(--text-primary-color, #fff);
     }
-    .modes button.confirm { border-color: var(--warning-color, #d9650a); color: var(--warning-color, #d9650a); font-weight: 500; }
+    button.confirm { border-color: var(--warning-color, #d9650a); color: var(--warning-color, #d9650a); font-weight: 500; }
     .note { margin: 0; font-size: 12px; color: var(--secondary-text-color, #666); }
     .problems { margin: 0; padding: 8px 12px; font-size: 13px; border-radius: 8px; color: var(--error-color, #db4437); border: 1px solid currentColor; }
     .foot { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 12px; font-size: 12px; color: var(--secondary-text-color, #666); }
@@ -276,6 +280,7 @@
             ${today("heating_today", "Heating", 0, "%")}
             ${today("longest_closed_today", "Longest off", 1, " h")}
           </div>
+          ${this._learned(room, name)}
           <div class="modes" role="group" aria-label="Mode of ${name}">${MODES.map(([value, label]) => this._modeButton(room, mode, value, label)).join("")}</div>
           <p class="note">${MODE_NOTES[mode] || ""}</p>
           <div class="foot">
@@ -286,9 +291,27 @@
       `;
     }
 
+    _learned(room, name) {
+      const state = this._state(room, "learned_demand");
+      if (!state) return "";
+      const demand = this._number(room, "learned_demand");
+      const { source, learned_from_hours: hours = 0 } = state.attributes;
+      const seen = source === "thermostat" ? "Valve opening seen on the thermostat" : "Valve opening this room needs";
+      const label = demand === null ? "Nothing learned yet. It takes a few hours near the target." : `${seen}, from ${this._duration(hours)} of data`;
+      const confirming = this._isPending(room, "reset");
+      const reset = room.entities.reset_learning
+        ? `<button class="${confirming ? "confirm" : ""}" data-action="reset" data-room="${room.id}" aria-label="Reset what ${name} has learned">${confirming ? "Confirm?" : "Reset learning"}</button>`
+        : "";
+      return `<div class="learned"><div><b>${demand === null ? "–" : demand + "%"}</b><span>${label}</span></div>${reset}</div>`;
+    }
+
+    _duration(hours) {
+      return hours >= 48 ? `${this._format(hours / 24, 0)} days` : `${this._format(hours, 0)} h`;
+    }
+
     _modeButton(room, mode, value, label) {
       const selected = mode === value;
-      const confirming = this._pending && this._pending.room === room.id && this._pending.mode === value;
+      const confirming = this._isPending(room, value);
       const classes = [selected ? "selected" : "", confirming ? "confirm" : ""].join(" ");
       return `<button class="${classes}" data-action="mode" data-room="${room.id}" data-mode="${value}" aria-pressed="${selected}">${confirming ? "Confirm?" : label}</button>`;
     }
@@ -303,6 +326,7 @@
       const room = this._rooms().find((item) => item.id === button.dataset.room);
       if (!room) return;
       if (button.dataset.action === "target") this._changeTarget(room, Number(button.dataset.delta));
+      else if (button.dataset.action === "reset") this._resetLearning(room);
       else this._changeMode(room, button.dataset.mode);
     }
 
@@ -326,20 +350,36 @@
       const current = (this._state(room, "mode") || {}).state;
       if (current === mode) return;
       // Starting or handing over control writes to the thermostat, so a stray tap must not do it.
-      const needsConfirm = mode !== "observe";
-      const confirmed = this._pending && this._pending.room === room.id && this._pending.mode === mode;
+      if (this._confirmed(room, mode, mode === "observe")) {
+        this._hass.callService("select", "select_option", { entity_id: room.entities.mode, option: mode });
+      }
+      this._update();
+    }
+
+    _resetLearning(room) {
+      // What was learned cannot be brought back, so a stray tap must not do it.
+      if (this._confirmed(room, "reset")) {
+        this._hass.callService("button", "press", { entity_id: room.entities.reset_learning });
+      }
+      this._update();
+    }
+
+    _isPending(room, action) {
+      return Boolean(this._pending && this._pending.room === room.id && this._pending.action === action);
+    }
+
+    // Returns whether to go ahead. Otherwise the action now waits for a second tap.
+    _confirmed(room, action, immediately = false) {
+      const confirmed = immediately || this._isPending(room, action);
       clearTimeout(this._pendingTimer);
-      if (needsConfirm && !confirmed) {
-        this._pending = { room: room.id, mode };
+      this._pending = confirmed ? null : { room: room.id, action };
+      if (!confirmed) {
         this._pendingTimer = setTimeout(() => {
           this._pending = null;
           this._update();
         }, CONFIRM_MS);
-      } else {
-        this._pending = null;
-        this._hass.callService("select", "select_option", { entity_id: room.entities.mode, option: mode });
       }
-      this._update();
+      return confirmed;
     }
   }
 
