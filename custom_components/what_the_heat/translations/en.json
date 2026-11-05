@@ -3,6 +3,9 @@
     "abort": {
       "already_configured": "This thermostat already belongs to a room."
     },
+    "error": {
+      "own_entity": "Select the real thermostat, not an entity created by this integration."
+    },
     "step": {
       "user": {
         "title": "Add a room",
@@ -48,6 +51,19 @@
     "binary_sensor": {
       "valve_requested": { "name": "Valve requested" },
       "problem": { "name": "Problem" }
+    },
+    "climate": {
+      "zone": {
+        "state_attributes": {
+          "preset_mode": {
+            "state": {
+              "observe": "Observe",
+              "active": "Active",
+              "handback": "Hand back to thermostat"
+            }
+          }
+        }
+      }
     },
     "number": {
       "target": { "name": "Target" }

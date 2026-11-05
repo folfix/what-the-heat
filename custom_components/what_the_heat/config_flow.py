@@ -9,6 +9,7 @@ from homeassistant.components.climate import DOMAIN as CLIMATE_DOMAIN
 from homeassistant.config_entries import ConfigEntry, ConfigFlow, ConfigFlowResult, OptionsFlow
 from homeassistant.const import CONF_NAME, UnitOfTemperature, UnitOfTime
 from homeassistant.core import callback
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.selector import (
     EntitySelector,
     EntitySelectorConfig,
@@ -85,6 +86,14 @@ class WhatTheHeatConfigFlow(ConfigFlow, domain=DOMAIN):
         """Ask for the room's settings."""
         if user_input is None:
             return self.async_show_form(step_id="user", data_schema=USER_SCHEMA)
+        registered = er.async_get(self.hass).async_get(user_input[CONF_THERMOSTAT])
+        if registered is not None and registered.platform == DOMAIN:
+            # A room's own thermostat entity would make the room control itself.
+            return self.async_show_form(
+                step_id="user",
+                data_schema=self.add_suggested_values_to_schema(USER_SCHEMA, user_input),
+                errors={CONF_THERMOSTAT: "own_entity"},
+            )
         await self.async_set_unique_id(user_input[CONF_THERMOSTAT])
         self._abort_if_unique_id_configured()
         return self.async_create_entry(title=user_input[CONF_NAME], data=user_input)

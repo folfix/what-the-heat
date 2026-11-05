@@ -271,6 +271,9 @@ class ZoneCoordinator(DataUpdateCoordinator[ZoneData]):
     async def async_set_mode(self, mode: Mode) -> None:
         """Change who is in charge of the thermostat, and act on it right away."""
         LOGGER.info("%s: mode %s -> %s", self._thermostat, self.runner.mode.value, mode.value)
+        if self.runner.mode is Mode.ACTIVE and mode is Mode.OBSERVE:
+            # Observe mode writes nothing, so the thermostat would stay on its band setpoint.
+            await self._async_execute(Command(CommandKind.SET_TEMPERATURE, self.runner.target))
         self.runner.set_mode(mode)
         await self._async_apply_change()
 

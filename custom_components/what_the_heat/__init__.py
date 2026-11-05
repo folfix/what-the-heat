@@ -19,21 +19,26 @@ if TYPE_CHECKING:
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up one room."""
     from .coordinator import ZoneCoordinator  # noqa: PLC0415
+    from .panel import async_add_panel  # noqa: PLC0415
 
     coordinator = ZoneCoordinator(hass, entry)
     await coordinator.async_load()
     await coordinator.async_config_entry_first_refresh()
     entry.runtime_data = coordinator
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    await async_add_panel(hass)
     entry.async_on_unload(entry.add_update_listener(_async_options_changed))
     return True
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload one room and give the plain target back to its thermostat."""
+    from .panel import remove_panel_if_unused  # noqa: PLC0415
+
     unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unloaded:
         await entry.runtime_data.async_release()
+        remove_panel_if_unused(hass, entry)
     return unloaded
 
 

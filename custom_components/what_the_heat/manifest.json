@@ -1,11 +1,11 @@
 {
   "domain": "what_the_heat",
   "name": "What the Heat",
-  "after_dependencies": ["climate"],
+  "after_dependencies": ["climate", "frontend", "http"],
   "codeowners": ["@folfix"],
   "config_flow": true,
   "documentation": "https://github.com/folfix/what-the-heat",
   "iot_class": "calculated",
   "issue_tracker": "https://github.com/folfix/what-the-heat/issues",
-  "version": "0.1.1"
+  "version": "0.2.0"
 }

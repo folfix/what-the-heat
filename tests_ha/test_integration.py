@@ -1,13 +1,19 @@
 """The integration inside Home Assistant, with a stand-in thermostat entity."""
 
 import asyncio
+import json
 import logging
 from datetime import timedelta
+from pathlib import Path
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from homeassistant import config_entries
+from homeassistant.components.frontend import DATA_PANELS
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
+from homeassistant.exceptions import HomeAssistantError
+from homeassistant.setup import async_setup_component
 from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
@@ -23,10 +29,13 @@ from custom_components.what_the_heat.const import (
     CONF_TARGET,
     CONF_THERMOSTAT,
     DOMAIN,
+    VERSION,
 )
 from custom_components.what_the_heat.diagnostics import async_get_config_entry_diagnostics
+from custom_components.what_the_heat.panel import PANEL_URL_PATH
 
 THERMOSTAT = "climate.pilot_thermostat"
+ROOM = "climate.pilot"
 HEAT_PUMP = "climate.heat_pump"
 OUTDOOR = "sensor.outdoor"
 MODE = "select.pilot_mode"
@@ -63,12 +72,15 @@ def set_thermostat(
 
 
 @pytest.fixture
-def set_temperature_calls(hass: HomeAssistant):
+async def set_temperature_calls(hass: HomeAssistant):
+    # The climate component replaces any service registered before it loads.
+    assert await async_setup_component(hass, "climate", {})
     return async_mock_service(hass, "climate", "set_temperature")
 
 
 @pytest.fixture
-def set_hvac_mode_calls(hass: HomeAssistant):
+async def set_hvac_mode_calls(hass: HomeAssistant):
+    assert await async_setup_component(hass, "climate", {})
     return async_mock_service(hass, "climate", "set_hvac_mode")
 
 
@@ -237,14 +249,96 @@ async def test_thermostat_missing_at_startup_is_picked_up_later(hass: HomeAssist
     assert hass.states.get(STATUS).state == "normal"
 
 
-async def test_failing_service_call_does_not_stop_the_room(hass: HomeAssistant) -> None:
+async def test_failing_service_call_does_not_stop_the_room(hass: HomeAssistant, caplog) -> None:
+    assert await async_setup_component(hass, "climate", {})
+
+    async def fail(_call) -> None:
+        raise HomeAssistantError("device offline")
+
+    hass.services.async_register("climate", "set_temperature", fail)
     set_thermostat(hass, temperature=20.0, setpoint=15.0)
     entry = await add_room(hass)
-    # No climate service exists in this test, so the call raises.
     await select_mode(hass, "active")
     await tick(hass, entry)
     assert entry.runtime_data.last_update_success
     assert hass.states.get(MODE).state == "active"
+    assert "device offline" in caplog.text
+
+
+async def test_room_has_its_own_thermostat_entity(hass: HomeAssistant) -> None:
+    set_thermostat(hass, temperature=20.2, setpoint=19.0, action="idle")
+    await add_room(hass)
+    state = hass.states.get(ROOM)
+    assert state.state == "heat"
+    assert state.attributes["current_temperature"] == 20.2
+    assert state.attributes["temperature"] == 21.0
+    assert state.attributes["preset_mode"] == "observe"
+    assert state.attributes["hvac_action"] == "idle"
+
+
+async def test_thermostat_entity_changes_target_and_mode(hass: HomeAssistant) -> None:
+    set_thermostat(hass, temperature=20.0, setpoint=19.0)
+    await add_room(hass)
+    await hass.services.async_call("climate", "set_temperature", {"entity_id": ROOM, "temperature": 22.5}, blocking=True)
+    await hass.async_block_till_done()
+    assert float(hass.states.get(TARGET).state) == 22.5
+    await hass.services.async_call("climate", "set_preset_mode", {"entity_id": ROOM, "preset_mode": "handback"}, blocking=True)
+    await hass.async_block_till_done()
+    assert hass.states.get(MODE).state == "handback"
+    assert hass.states.get(ROOM).attributes["preset_mode"] == "handback"
+
+
+async def test_a_room_cannot_control_its_own_entity(hass: HomeAssistant) -> None:
+    set_thermostat(hass)
+    await add_room(hass)
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {"name": "Loop", CONF_THERMOSTAT: ROOM, CONF_TARGET: 21.0, CONF_BUFFER_FALLBACK: 34.0, CONF_PHASE_OFFSET: 0},
+    )
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {CONF_THERMOSTAT: "own_entity"}
+
+
+async def test_leaving_active_for_observe_gives_the_target_back(hass: HomeAssistant, set_temperature_calls) -> None:
+    set_thermostat(hass, temperature=20.0, setpoint=15.0)
+    entry = await add_room(hass)
+    await select_mode(hass, "active")
+    assert set_temperature_calls[-1].data["temperature"] == 23.0
+    await select_mode(hass, "observe")
+    assert set_temperature_calls[-1].data["temperature"] == 21.0
+    count = len(set_temperature_calls)
+    await tick(hass, entry)
+    assert len(set_temperature_calls) == count
+
+
+async def test_sidebar_panel_follows_the_rooms(hass: HomeAssistant) -> None:
+    hass.http = Mock(async_register_static_paths=AsyncMock())
+    set_thermostat(hass)
+    entry = await add_room(hass)
+    panels = hass.data[DATA_PANELS]
+    assert PANEL_URL_PATH in panels
+    assert panels[PANEL_URL_PATH].sidebar_title == "What the Heat"
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert PANEL_URL_PATH in panels
+    assert hass.http.async_register_static_paths.await_count == 1
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    assert PANEL_URL_PATH not in panels
+
+
+def test_version_matches_the_manifest() -> None:
+    manifest = json.loads(Path("custom_components/what_the_heat/manifest.json").read_text(encoding="utf-8"))
+    assert manifest["version"] == VERSION
+
+
+def test_panel_file_exists() -> None:
+    assert Path("custom_components/what_the_heat/frontend/panel.js").is_file()
+
+
+def test_translations_match_strings() -> None:
+    base = Path("custom_components/what_the_heat")
+    assert (base / "strings.json").read_text(encoding="utf-8") == (base / "translations/en.json").read_text(encoding="utf-8")
 
 
 async def test_buffer_is_read_from_the_heat_pump_setpoint(hass: HomeAssistant) -> None:

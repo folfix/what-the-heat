@@ -43,13 +43,15 @@ The integration measures this period too, which provides the comparison.
 
 If the heat pump runs on its own curve, first set **Typical buffer temperature** in the integration's settings to the water temperature it usually runs at. Within about 2 °C of the real value the results barely change in simulation. At 4 °C most simulated rooms still hold, but some get clearly worse. At a fixed temperature, its set value is read directly.
 
-Set **Mode** to **Active**. The thermostat display will now alternate between target + 2 °C and target - 2 °C, which is expected.
+Set the mode to **Active**, either with the **Mode** entity or on the **What the Heat** page in the sidebar, where a second click confirms it. The thermostat display will now alternate between target + 2 °C and target - 2 °C, which is expected.
 
 While in Active mode:
 - Change the temperature through the **Target** entity. A change made on the thermostat itself is overwritten within minutes.
 - A thermostat that is switched off gets switched back on. To stop this, change the mode first.
 
 ## 5. What to watch
+
+The **What the Heat** page in the sidebar shows the main values for all rooms. Each room also has a thermostat entity for a regular tile or thermostat card on a dashboard, which changes the target and the mode.
 
 | Entity | Meaning |
 |---|---|
@@ -65,7 +67,7 @@ While in Active mode:
 
 ## 6. Stopping
 
-Set **Mode** to **Hand back to thermostat**. The thermostat gets the plain target once and is then left alone. Removing or reloading the integration while in Active mode does the same.
+Set the mode to **Hand back to thermostat**. The thermostat gets the plain target once and is then left alone. Going from Active to Observe, or removing or reloading the integration while in Active mode, does the same.
 
 If Home Assistant stops, the thermostat keeps its last setpoint, so the room settles near target + 2 °C or target - 2 °C.
 

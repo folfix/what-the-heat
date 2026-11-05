@@ -254,7 +254,7 @@ Valve exercise: any loop idle for 7 days is opened for 15 minutes. The 15 second
 
 ### 6.9 Integration and repository
 
-Each room is one configuration entry. The integration exposes the target, duty, PID terms, valve state, status and daily comfort metrics as entities, plus a diagnostics download with one row per day. Each zone has a mode: `observe` (calculates and logs only, the default for a new room), `active`, or `handback`.
+Each room is one configuration entry. The integration exposes the target, duty, PID terms, valve state, status and daily comfort metrics as entities, plus a diagnostics download with one row per day. Each room also has a thermostat entity for dashboards, with the modes as presets. A sidebar page shows all rooms as tiles, using plain JavaScript with no build step. Each zone has a mode: `observe` (calculates and logs only, the default for a new room), `active`, or `handback`.
 
 On switching from `observe` to `active`, the integral starts from how much the thermostat has recently been heating, but only if the room is near its target. Otherwise it starts from zero.
 
@@ -262,6 +262,7 @@ On switching from `observe` to `active`, the integral starts from how much the t
 custom_components/what_the_heat/
   core/          pure Python, no Home Assistant imports
                  (pid, cycle, valve, zone, runner, daily)
+  frontend/      sidebar page
   ...            thin Home Assistant layer
 tests/           core tests, no dependencies
   simulation/    three-node rooms, actuators, faults
