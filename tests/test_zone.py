@@ -16,12 +16,12 @@ class ZoneControllerTest(unittest.TestCase):
         decision = ZoneController(ZoneConfig(target=20.0)).step(0.0, 18.0)
         self.assertIs(decision.status, ZoneStatus.NORMAL)
         self.assertTrue(decision.valve_open)
-        self.assertEqual(decision.setpoint, 22.0)
+        self.assertEqual(decision.setpoint, 23.0)
 
     def test_warm_room_closes_the_valve(self) -> None:
         decision = ZoneController(ZoneConfig(target=20.0)).step(0.0, 22.0)
         self.assertFalse(decision.valve_open)
-        self.assertEqual(decision.setpoint, 18.0)
+        self.assertEqual(decision.setpoint, 17.0)
 
     def test_hotter_water_gives_less_duty(self) -> None:
         config = ZoneConfig(target=20.0, pid=PidConfig(kp=50.0, ki=0.0))
@@ -84,7 +84,7 @@ class ZoneControllerTest(unittest.TestCase):
     def test_target_change_applies_to_setpoints(self) -> None:
         controller = ZoneController(ZoneConfig(target=20.0))
         controller.target = 21.0
-        self.assertEqual(controller.step(0.0, 18.0).setpoint, 23.0)
+        self.assertEqual(controller.step(0.0, 18.0).setpoint, 24.0)
 
     def test_state_survives_a_restart(self) -> None:
         controller = ZoneController(ZoneConfig(target=20.0), integral=33.0, carry_s=120.0)

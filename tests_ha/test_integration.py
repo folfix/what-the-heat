@@ -179,7 +179,7 @@ async def test_active_mode_opens_a_cold_room(hass: HomeAssistant, set_temperatur
     await select_mode(hass, "active")
     assert hass.states.get(MODE).state == "active"
     assert len(set_temperature_calls) == 1
-    assert set_temperature_calls[0].data == {"entity_id": THERMOSTAT, "temperature": 23.0}
+    assert set_temperature_calls[0].data == {"entity_id": THERMOSTAT, "temperature": 24.0}
     assert hass.states.get(WRITES).state == "1"
 
 
@@ -190,13 +190,13 @@ async def test_decisions_and_commands_are_logged(hass: HomeAssistant, set_temper
     assert "duty=" in caplog.text
     await select_mode(hass, "active")
     assert "mode observe -> active" in caplog.text
-    assert "set_temperature {'temperature': 23.0}" in caplog.text
+    assert "set_temperature {'temperature': 24.0}" in caplog.text
 
 
 async def test_active_mode_switches_on_a_thermostat_that_is_off(
     hass: HomeAssistant, set_temperature_calls, set_hvac_mode_calls
 ) -> None:
-    set_thermostat(hass, temperature=20.0, setpoint=23.0, state="off", action="off")
+    set_thermostat(hass, temperature=20.0, setpoint=24.0, state="off", action="off")
     await add_room(hass)
     await select_mode(hass, "active")
     assert len(set_hvac_mode_calls) == 1
@@ -204,7 +204,7 @@ async def test_active_mode_switches_on_a_thermostat_that_is_off(
 
 
 async def test_handback_writes_the_plain_target_once(hass: HomeAssistant, set_temperature_calls) -> None:
-    set_thermostat(hass, temperature=20.0, setpoint=23.0, action="heating")
+    set_thermostat(hass, temperature=20.0, setpoint=24.0, action="heating")
     entry = await add_room(hass)
     await select_mode(hass, "handback")
     assert [call.data["temperature"] for call in set_temperature_calls] == [21.0]
@@ -215,17 +215,17 @@ async def test_handback_writes_the_plain_target_once(hass: HomeAssistant, set_te
 
 
 async def test_target_change_moves_the_setpoint(hass: HomeAssistant, set_temperature_calls) -> None:
-    set_thermostat(hass, temperature=20.0, setpoint=23.0, action="heating")
+    set_thermostat(hass, temperature=20.0, setpoint=24.0, action="heating")
     await add_room(hass)
     await select_mode(hass, "active")
     await hass.services.async_call("number", "set_value", {"entity_id": TARGET, "value": 22.0}, blocking=True)
     await hass.async_block_till_done()
     assert float(hass.states.get(TARGET).state) == 22.0
-    assert set_temperature_calls[-1].data["temperature"] == 24.0
+    assert set_temperature_calls[-1].data["temperature"] == 25.0
 
 
 async def test_runs_every_minute_on_its_own(hass: HomeAssistant, set_temperature_calls) -> None:
-    set_thermostat(hass, temperature=20.8, setpoint=19.0)
+    set_thermostat(hass, temperature=20.8, setpoint=18.0)
     await add_room(hass)
     # The first run has no elapsed time to measure, so the metric appears on the second.
     assert hass.states.get(IN_BAND).state == "unknown"
@@ -249,7 +249,7 @@ async def test_thermostat_missing_at_startup_is_picked_up_later(hass: HomeAssist
     assert set_temperature_calls == []
     set_thermostat(hass, temperature=20.0, setpoint=15.0)
     await tick(hass, entry)
-    assert [call.data["temperature"] for call in set_temperature_calls] == [23.0]
+    assert [call.data["temperature"] for call in set_temperature_calls] == [24.0]
     assert hass.states.get(STATUS).state == "normal"
 
 
@@ -270,7 +270,7 @@ async def test_failing_service_call_does_not_stop_the_room(hass: HomeAssistant, 
 
 
 async def test_room_has_its_own_thermostat_entity(hass: HomeAssistant) -> None:
-    set_thermostat(hass, temperature=20.2, setpoint=19.0, action="idle")
+    set_thermostat(hass, temperature=20.2, setpoint=18.0, action="idle")
     await add_room(hass)
     state = hass.states.get(ROOM)
     assert state.state == "heat"
@@ -287,7 +287,7 @@ async def test_thermostat_entity_uses_current_home_assistant_names(hass: HomeAss
 
 
 async def test_thermostat_entity_changes_target_and_mode(hass: HomeAssistant) -> None:
-    set_thermostat(hass, temperature=20.0, setpoint=19.0)
+    set_thermostat(hass, temperature=20.0, setpoint=18.0)
     await add_room(hass)
     await hass.services.async_call("climate", "set_temperature", {"entity_id": ROOM, "temperature": 22.5}, blocking=True)
     await hass.async_block_till_done()
@@ -314,7 +314,7 @@ async def test_leaving_active_for_observe_gives_the_target_back(hass: HomeAssist
     set_thermostat(hass, temperature=20.0, setpoint=15.0)
     entry = await add_room(hass)
     await select_mode(hass, "active")
-    assert set_temperature_calls[-1].data["temperature"] == 23.0
+    assert set_temperature_calls[-1].data["temperature"] == 24.0
     await select_mode(hass, "observe")
     assert set_temperature_calls[-1].data["temperature"] == 21.0
     count = len(set_temperature_calls)
@@ -388,7 +388,7 @@ async def test_heat_pump_is_neither_read_nor_changed(hass: HomeAssistant, set_te
 async def test_a_running_room_from_an_older_version_keeps_working(
     hass: HomeAssistant, hass_storage, entity_registry: er.EntityRegistry, set_temperature_calls
 ) -> None:
-    set_thermostat(hass, temperature=18.8, setpoint=23.0, action="heating")
+    set_thermostat(hass, temperature=18.8, setpoint=24.0, action="heating")
     entry = room_entry(buffer_entity=HEAT_PUMP, buffer_fallback=34.0)
     entry.add_to_hass(hass)
     old = entity_registry.async_get_or_create(
@@ -458,12 +458,12 @@ async def test_rooms_starting_together_all_load_and_share_one_page(hass: HomeAss
 
 async def test_room_is_controlled_even_if_the_page_cannot_be_added(hass: HomeAssistant, set_temperature_calls) -> None:
     hass.http = Mock(async_register_static_paths=AsyncMock(side_effect=RuntimeError("no page")))
-    set_thermostat(hass, temperature=20.0, setpoint=19.0)
+    set_thermostat(hass, temperature=20.0, setpoint=18.0)
     entry = await add_room(hass)
     assert entry.state is ConfigEntryState.LOADED
     assert PANEL_URL_PATH not in hass.data.get(DATA_PANELS, {})
     await select_mode(hass, "active")
-    assert set_temperature_calls[-1].data["temperature"] == 23.0
+    assert set_temperature_calls[-1].data["temperature"] == 24.0
 
 
 async def test_unload_gives_the_target_back_when_active(hass: HomeAssistant, set_temperature_calls) -> None:
@@ -496,7 +496,7 @@ async def test_state_survives_a_reload(hass: HomeAssistant, set_temperature_call
 
 
 async def test_saved_state_is_restored(hass: HomeAssistant, hass_storage, set_temperature_calls) -> None:
-    set_thermostat(hass, temperature=21.0, setpoint=23.0, action="heating")
+    set_thermostat(hass, temperature=21.0, setpoint=24.0, action="heating")
     entry = room_entry()
     entry.add_to_hass(hass)
     hass_storage[f"{DOMAIN}.{entry.entry_id}"] = {

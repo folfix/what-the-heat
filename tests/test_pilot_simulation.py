@@ -2,6 +2,7 @@
 
 import unittest
 
+from custom_components.what_the_heat.core.valve import ValveConfig
 from custom_components.what_the_heat.core.zone import ZoneStatus
 from tests.simulation.harness import DAY_S, Environment, Faults, simulate
 from tests.simulation.pilot import ROOMS, TARGET
@@ -115,8 +116,9 @@ class PilotFaultTest(unittest.TestCase):
                 start = 6 * DAY_S + start_h * 3600.0
                 outage = (start, start + 2 * DAY_S)
                 result = simulate(self.parameters, self.environment, TARGET, faults=Faults(controller_outage=outage))
-                self.assertGreater(result.low, TARGET - 2.5)
-                self.assertLess(result.high, TARGET + 2.5)
+                limit = ValveConfig().band + 0.5
+                self.assertGreater(result.low, TARGET - limit)
+                self.assertLess(result.high, TARGET + limit)
 
 
 if __name__ == "__main__":

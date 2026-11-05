@@ -19,7 +19,7 @@ Each room runs on its own, once a minute:
 2. **Calculate demand:** a PI controller works out how much heat the room needs from the distance to the target and how long it has lasted.
 3. **Convert to duty:** demand becomes the share of time the valve should be open. The hotter the water, the shorter the opening.
 4. **Plan cycles:** the duty is split into cycles of 90 to 180 minutes, with at least 12 minutes open and 12 minutes closed. On-time too short to run moves to the next cycle.
-5. **Move the valve:** a setpoint of target + 2 °C makes the thermostat open it, and target - 2 °C makes it close. A watchdog checks that the thermostat followed, and repeats the command if not.
+5. **Move the valve:** a setpoint of target + 3 °C makes the thermostat open it, and target - 3 °C makes it close. A watchdog checks that the thermostat followed, and repeats the command if not. The thermostat's own dead zone should be at most about 2.5 °C, or these setpoints may not switch it while the room is near its target.
 
 If everything stops, the thermostat keeps its last setpoint and holds the room near it. Outside that band the thermostat acts on its own, so the room stays safe.
 

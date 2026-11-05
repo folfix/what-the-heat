@@ -10,7 +10,9 @@ from enum import Enum
 class ValveConfig:
     """Setpoint band and device limits."""
 
-    band: float = 2.0
+    # Must exceed the thermostat's own dead zone by about 0.5, or the open setpoint does
+    # not switch its relay on while the room is near the target.
+    band: float = 3.0
     setpoint_step: float = 0.5
     device_min: float = 5.0
     device_max: float = 35.0

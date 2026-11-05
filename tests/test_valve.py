@@ -13,13 +13,13 @@ from custom_components.what_the_heat.core.valve import (
 class SetpointTest(unittest.TestCase):
     def test_band_around_the_target(self) -> None:
         config = ValveConfig()
-        self.assertEqual(open_setpoint(20.0, config), 22.0)
-        self.assertEqual(closed_setpoint(20.0, config), 18.0)
+        self.assertEqual(open_setpoint(20.0, config), 23.0)
+        self.assertEqual(closed_setpoint(20.0, config), 17.0)
 
     def test_rounded_to_the_device_step(self) -> None:
         config = ValveConfig()
-        self.assertEqual(open_setpoint(20.3, config), 22.5)
-        self.assertEqual(closed_setpoint(20.3, config), 18.5)
+        self.assertEqual(open_setpoint(20.3, config), 23.5)
+        self.assertEqual(closed_setpoint(20.3, config), 17.5)
 
     def test_stays_one_step_below_the_device_maximum(self) -> None:
         self.assertEqual(open_setpoint(34.0, ValveConfig()), 34.5)

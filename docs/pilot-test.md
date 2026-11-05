@@ -41,7 +41,9 @@ The integration measures this period too, which provides the comparison.
 
 ## 4. Take over
 
-Set the mode to **Active**, either with the **Mode** entity or on the **What the Heat** page in the sidebar, where a second click confirms it. The thermostat display will now alternate between target + 2 °C and target - 2 °C, which is expected.
+First check the thermostat's own dead zone, which Meross LAN shows as a separate number entity. It should be at most about 2.5 °C. With a wider one, the setpoints below may not switch the thermostat while the room is near its target, so lower it.
+
+Set the mode to **Active**, either with the **Mode** entity or on the **What the Heat** page in the sidebar, where a second click confirms it. The thermostat display will now alternate between target + 3 °C and target - 3 °C, which is expected.
 
 While in Active mode:
 - Change the temperature through the **Target** entity. A change made on the thermostat itself is overwritten within minutes.
@@ -67,7 +69,7 @@ The **What the Heat** page in the sidebar shows the main values for all rooms. E
 
 Set the mode to **Hand back to thermostat**. The thermostat gets the plain target once and is then left alone. Going from Active to Observe, or removing or reloading the integration while in Active mode, does the same.
 
-If Home Assistant stops, the thermostat keeps its last setpoint, so the room settles near target + 2 °C or target - 2 °C.
+If Home Assistant stops, the thermostat keeps its last setpoint, so the room slowly moves toward target + 3 °C or target - 3 °C.
 
 ## 7. Collecting results
 

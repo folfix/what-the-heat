@@ -180,9 +180,10 @@ Worked example with `k1 = 0.27`, `k3 = 0.94`, target 21 °C, 3 °C outdoors: `L 
 
 ### 6.3 L0: valve
 
-- ON setpoint is target + 2 °C, OFF setpoint is target - 2 °C. Extreme setpoints such as 30 °C and 5 °C are not used.
-- With a 0.3 °C differential the controller decides as long as the room stays within about target ±1.7 °C. Outside that range the thermostat takes over, which is intended: it closes on overheating and opens on cooling.
-- If Home Assistant stops, the thermostat holds its last setpoint, so the room settles near target ±2 °C without any software running.
+- ON setpoint is target + 3 °C, OFF setpoint is target - 3 °C. Extreme setpoints such as 30 °C and 5 °C are not used.
+- The band must exceed the thermostat's own dead zone by about 0.5 °C, or the ON setpoint does not switch the relay while the room is near the target. Meross LAN exposes this dead zone as a number entity with a range of 0.5-3.5 °C. Simulated with the relay switching on at setpoint minus dead zone: up to 1 °C the band makes no difference. At 2.5 °C a ±2 °C band keeps the room within ±0.3 °C only 7-20% of the time, against 100% for ±3 °C. At 3.5 °C a ±3 °C band fails the same way. How the real device applies its dead zone has not been measured.
+- With a 0.3 °C differential the controller decides as long as the room stays within about target ±2.7 °C. Outside that range the thermostat takes over, which is intended: it closes on overheating and opens on cooling.
+- If Home Assistant stops, the thermostat holds its last setpoint, so the room slowly moves toward target ±3 °C without any software running. A wider band costs nothing in normal operation, and this is its price: in a simulated two-day outage the lowest temperature fell by 1 °C compared with a ±2 °C band, from about 18.7 °C to 17.7 °C at a target of 21 °C.
 - Setpoints are clamped to the device range, one step below `max_temp`.
 - Control uses the setpoint only. `hvac_mode` stays on `heat`, in manual mode, with no device schedule.
 - Commands are tagged with a context so that user changes can be recognised.
@@ -235,7 +236,7 @@ New values are blended in (85% old, 15% new). No deliberate cooling of rooms is 
 
 | Failure | Behaviour |
 |---|---|
-| Home Assistant down | Thermostats keep the room near target ±2 °C. |
+| Home Assistant down | Thermostats keep the room within about target ±3 °C. |
 | Integration unloaded or crashed | Thermostats get the plain target as setpoint and regulate on their own (hand-back). Heartbeat entity for monitoring. |
 | Thermostat unavailable | Zone reports unavailable instead of a false "off", and integration pauses. Other zones are unaffected. |
 | Room temperature stale | After 30 min the last duty is held. After 60 min the zone is handed back to the thermostat. |
@@ -277,7 +278,7 @@ docs/
 | Cycle length | 90-180 min | simulation |
 | Minimum open and closed time | 12 min | hass-ufh-controller (9 min) plus margin |
 | Actuator travel | 3.5 min, to be measured | hass-ufh-controller |
-| Setpoint band | target ±2 °C | this project |
+| Setpoint band | target ±3 °C | this project, wider than the thermostat's dead zone |
 | Outdoor lead | 2 h | simulation |
 | Floor offset filter | 3 h | simulation |
 | Water temperature | 30 °C, one global value | owner |
@@ -469,7 +470,7 @@ All based on what can be measured: air temperature and valve state.
 |---|---|
 | Built from scratch, with existing projects as references | Owner decision |
 | Home Assistant custom integration in Python | All layers in one codebase, first-class entities, restore state, existing test tooling |
-| Control through thermostat setpoints in a ±2 °C band | Safe when the software is not running |
+| Control through thermostat setpoints in a ±3 °C band | Safe when the software is not running, and wide enough to switch a thermostat with a dead zone of up to 2.5 °C |
 | No floor temperature anywhere in the control path | No sensors exist, and simulation shows it is not needed |
 | Learning through small per-room layers rather than a neural network | Limited data, explainability, safety |
 | No reading or control of the buffer or heat pump, and one global water temperature | Owner decision: each floor has a mixing valve fixed at 30 °C |
