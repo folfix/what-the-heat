@@ -167,6 +167,25 @@ class ZoneCoordinator(DataUpdateCoordinator[ZoneData]):
         buffer = self._read_buffer()
         outdoor = self._read_outdoor()
         step = self.runner.step(now_s, reading, buffer)
+        decision = step.decision
+        LOGGER.debug(
+            "%s: mode=%s status=%s room=%s filtered=%s setpoint=%s hvac=%s/%s buffer=%s "
+            "duty=%.1f integral=%.1f valve_open=%s requested=%s commands=%d",
+            self._thermostat,
+            step.mode.value,
+            decision.status.value,
+            reading.temperature,
+            decision.temperature,
+            reading.setpoint,
+            reading.hvac_mode,
+            reading.hvac_action,
+            buffer,
+            decision.duty,
+            decision.integral,
+            decision.valve_open,
+            decision.setpoint,
+            len(step.commands),
+        )
         for command in step.commands:
             await self._async_execute(command)
         dt_s = 0.0 if self._last_step_s is None else min(now_s - self._last_step_s, MAX_LOG_STEP_S)
@@ -189,19 +208,22 @@ class ZoneCoordinator(DataUpdateCoordinator[ZoneData]):
             self._store.async_delay_save(self.snapshot, 1)
         return ZoneData(step, reading, buffer, outdoor, self.log.today)
 
-    def _read_buffer(self) -> float | None:
+    def _read_buffer(self) -> float:
+        """Return the assumed buffer temperature.
+
+        During an outage the set temperature has most likely not changed, so the last one
+        stays in use. A heat pump on its own weather curve exposes no set temperature, and
+        the last one would soon be wrong, so the configured typical value applies instead.
+        """
+        fallback = self._settings.get(CONF_BUFFER_FALLBACK, DEFAULT_BUFFER_FALLBACK)
         entity = self._settings.get(CONF_BUFFER_ENTITY)
-        if entity:
-            state = self.hass.states.get(entity)
-            if _is_available(state):
-                raw = state.attributes.get(ATTR_TEMPERATURE) if state.domain == CLIMATE_DOMAIN else state.state
-                value = _number(raw)
-                if value is not None:
-                    self._last_buffer = value
-                    return value
-            if self._last_buffer is not None:
-                return self._last_buffer
-        return self._settings.get(CONF_BUFFER_FALLBACK, DEFAULT_BUFFER_FALLBACK)
+        if not entity:
+            return fallback
+        state = self.hass.states.get(entity)
+        if _is_available(state):
+            raw = state.attributes.get(ATTR_TEMPERATURE) if state.domain == CLIMATE_DOMAIN else state.state
+            self._last_buffer = _number(raw)
+        return fallback if self._last_buffer is None else self._last_buffer
 
     def _read_outdoor(self) -> float | None:
         entity = self._settings.get(CONF_OUTDOOR_ENTITY)
@@ -217,6 +239,7 @@ class ZoneCoordinator(DataUpdateCoordinator[ZoneData]):
         else:
             service = SERVICE_SET_HVAC_MODE
             data = {ATTR_HVAC_MODE: "heat"}
+        LOGGER.info("%s: %s %s", self._thermostat, service, data)
         try:
             await self.hass.services.async_call(
                 CLIMATE_DOMAIN,
@@ -234,8 +257,10 @@ class ZoneCoordinator(DataUpdateCoordinator[ZoneData]):
         self._notified = problems
         notification_id = f"{DOMAIN}_{self.config_entry.entry_id}"
         if not problems:
+            LOGGER.info("%s: no more problems", self._thermostat)
             persistent_notification.async_dismiss(self.hass, notification_id)
             return
+        LOGGER.warning("%s: problems: %s", self._thermostat, sorted(problem.value for problem in problems))
         persistent_notification.async_create(
             self.hass,
             "\n".join(PROBLEM_TEXT[problem] for problem in sorted(problems, key=lambda item: item.value)),
@@ -245,11 +270,13 @@ class ZoneCoordinator(DataUpdateCoordinator[ZoneData]):
 
     async def async_set_mode(self, mode: Mode) -> None:
         """Change who is in charge of the thermostat, and act on it right away."""
+        LOGGER.info("%s: mode %s -> %s", self._thermostat, self.runner.mode.value, mode.value)
         self.runner.set_mode(mode)
         await self._async_apply_change()
 
     async def async_set_target(self, target: float) -> None:
         """Change the target temperature, and act on it right away."""
+        LOGGER.info("%s: target %s -> %s", self._thermostat, self.runner.target, target)
         self.runner.target = target
         await self._async_apply_change()
 

@@ -103,12 +103,14 @@ def simulate(
     initial_integral: float = 30.0,
     band: float = 0.3,
     observe_days: float = 0.0,
+    assumed_buffer: float | None = None,
 ) -> Result:
     """Run the room and return what happened after the settling period.
 
     With observe_days the room first runs on the plain thermostat, with the runner in
     observe mode, and the runner then takes over. In that case settle_days counts from
-    the takeover.
+    the takeover. With assumed_buffer the controller believes in a buffer temperature
+    other than the real setpoint.
     """
     faults = faults or Faults()
     rng = random.Random(faults.seed)
@@ -161,7 +163,7 @@ def simulate(
                     hvac_action="heating" if thermostat.heating else "idle",
                     hvac_modes=("off", "heat"),
                 ),
-                environment.buffer_setpoint,
+                environment.buffer_setpoint if assumed_buffer is None else assumed_buffer,
             )
             result.statuses.add(step.decision.status)
             result.resends = step.resends

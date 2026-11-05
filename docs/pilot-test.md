@@ -24,7 +24,7 @@ Restart Home Assistant in both cases.
 | Thermostat | The room's `climate` entity |
 | Target temperature | 21 |
 | Heat pump or buffer entity | The heat pump's `climate` entity. Its set temperature is used. |
-| Buffer temperature when no reading is available | The fixed temperature set on the heat pump |
+| Typical buffer temperature | Used while the heat pump exposes no set temperature, such as on its own weather curve. See step 4. |
 | Outdoor temperature sensor | The outdoor sensor. It is only logged for now. |
 | Delay of the first cycle | 0 |
 
@@ -34,12 +34,14 @@ A new room starts in **Observe** mode. It writes nothing to the thermostat, so t
 
 1. Close the room and keep it closed during the test.
 2. Set the thermostat itself to 21 °C. In Observe mode the integration does not do this.
-3. Set a fixed temperature on the heat pump, at most 38 °C, and leave it unchanged. It also affects all other rooms.
+3. Leave the heat pump in one mode for both the baseline and the controlled period: on its own curve, or at a fixed temperature of at most 38 °C. On the curve, the limit depends on the curve's settings. Any change also affects all other rooms.
 4. Wait until the room has warmed up, then for several more days. The first days are not representative, since walls and soil warm slowly.
 
 The integration measures this period too, which provides the comparison.
 
 ## 4. Take over
+
+If the heat pump runs on its own curve, first set **Typical buffer temperature** in the integration's settings to the water temperature it usually runs at. Within about 2 °C of the real value the results barely change in simulation. At 4 °C most simulated rooms still hold, but some get clearly worse. At a fixed temperature, its set value is read directly.
 
 Set **Mode** to **Active**. The thermostat display will now alternate between target + 2 °C and target - 2 °C, which is expected.
 
@@ -69,4 +71,19 @@ If Home Assistant stops, the thermostat keeps its last setpoint, so the room set
 
 ## 7. Collecting results
 
-On the device page, use **⋮ → Download diagnostics**. The file contains the settings and one row per day, including comfort metrics, heating share, mean temperatures and writes. `active_pct` tells baseline days and controlled days apart.
+On the device page, use **Download diagnostics**. The file contains the settings and one row per day, including comfort metrics, heating share, mean temperatures and writes. `active_pct` tells baseline days and controlled days apart.
+
+## 8. Logs
+
+By default only failed commands and problems reach the log. To see every decision, add this to `configuration.yaml` and restart:
+
+```yaml
+logger:
+  default: warning
+  logs:
+    custom_components.what_the_heat: debug
+```
+
+Then look under **Settings → System → Logs → Show raw logs**, or search for `what_the_heat`. At this level there is one line per minute for each room with the temperatures, duty, integral and requested setpoint, as well as commands, mode changes and problems. Use `info` instead of `debug` to keep only commands, mode changes and problems.
+
+For following behaviour over time, charts of the integration's entities are usually easier to read than the log. Try **Duty**, **Requested setpoint** and **Filtered temperature** next to the thermostat's own history.

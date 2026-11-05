@@ -84,7 +84,7 @@ The guiding principle **[REQUIREMENT]**: it is better to lower the buffer temper
 - How the device stores setpoints in flash, and the resulting wear, could not be determined. Write counts will be logged.
 
 ### 3.2 Samsung EHS through SmartThings (checked in the Home Assistant source and on the device)
-- In `auto` mode (expected to be the weather-compensation curve, to be confirmed) the integration does not expose a target temperature. In `heat` mode it does, so buffer control requires `heat` mode.
+- In `auto` mode (expected to be the weather-compensation curve, to be confirmed) the integration does not expose a target temperature. In `heat` mode it does, so buffer control requires `heat` mode. While the pump is in `auto`, the controller works from a configured typical buffer temperature.
 - The climate entity's current temperature read 55-58 °C while the diverter valve was on the tank. It is not the buffer temperature. Its meaning while heating the room is **[TODO]**.
 - The diverter valve position (`room` or `tank`) shows domestic hot water (DHW) periods, during which the buffer is not charged.
 - `Power` and `Energy` sensors allow energy baselines and compressor start detection.
@@ -383,6 +383,8 @@ Cold start, with the floor at air temperature, walls 1 K colder, and air at 13, 
 
 Real basement walls and soil are likely to warm much more slowly than this model, so the first days in a real room will not be representative.
 
+Error in the assumed buffer temperature, over the same room types. At a real 34 or 38 °C and an error within ±2 K, the worst room stayed within the band 92-100% of the time. At ±4 K half of the rooms were still at 100%, but the worst fell to 51-95%. At ±6 K the worst fell to 22-71%. At a real 30 °C, where some rooms are near their limit, ±2 K already took the worst room to 67-72%.
+
 ---
 
 ## 9. Roadmap
@@ -403,7 +405,7 @@ Real basement walls and soil are likely to warm much more slowly than this model
 A real test on one closed basement room, chosen for its small outside influence, at a target of 21 °C. The steps are in the [pilot test guide](pilot-test.md).
 
 - Only PID and cycles run. There is no prediction, learning or buffer control yet, but daily rows are logged from the first day.
-- The heat pump stays at a constant fixed temperature of at most 38 °C during comparisons, since changing it would also affect all other rooms. Those rooms remain on their own thermostats.
+- The heat pump stays in one mode during comparisons: on its own curve, or at a constant fixed temperature of at most 38 °C. Changing it would also affect all other rooms, which remain on their own thermostats. On the curve, the 38 °C limit depends on the curve's settings.
 - Sequence: a plain thermostat baseline at 21 °C, then `observe` mode, then `active` mode. The first days after a cold room starts warming are not used for comparison. Cold start can be tested later by switching the room off for a few days.
 - Measured: time within ±0.3 °C, RMS deviation, longest closed period, setpoint writes per day, watchdog events, and whether the relay follows commands.
 - Also to learn from it: real actuator travel, command latency, and how the thermostat switches around its setpoint.
@@ -435,6 +437,7 @@ All based on what can be measured: air temperature, valve state and heat pump da
 | Floor overheating with no sensor | 38 °C buffer limit |
 | The buffer limit is too low in hard frost | Rooms run fully open, an alert is raised |
 | The set temperature differs from the real buffer temperature | Accepted for simplicity. The integral compensates a steady difference. |
+| On the heat pump's own curve, the real buffer temperature moves away from the configured typical value | See 8.6 for the tolerance. Use a fixed temperature if a room reacts badly. |
 | Learning degrades a room | Bounds, trust threshold, fallback to PID, per-room switch |
 | Integration bug affects Home Assistant, since it runs in-process | Async only, no blocking work, core tested separately |
 | Short cycling of the compressor at low load | Phase staggering, longer open times, measured starts. Partly limited by hardware. |

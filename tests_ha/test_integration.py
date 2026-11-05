@@ -1,6 +1,7 @@
 """The integration inside Home Assistant, with a stand-in thermostat entity."""
 
 import asyncio
+import logging
 from datetime import timedelta
 
 import pytest
@@ -166,6 +167,16 @@ async def test_active_mode_opens_a_cold_room(hass: HomeAssistant, set_temperatur
     assert hass.states.get(WRITES).state == "1"
 
 
+async def test_decisions_and_commands_are_logged(hass: HomeAssistant, set_temperature_calls, caplog) -> None:
+    caplog.set_level(logging.DEBUG, logger="custom_components.what_the_heat")
+    set_thermostat(hass, temperature=20.0, setpoint=15.0)
+    await add_room(hass)
+    assert "duty=" in caplog.text
+    await select_mode(hass, "active")
+    assert "mode observe -> active" in caplog.text
+    assert "set_temperature {'temperature': 23.0}" in caplog.text
+
+
 async def test_active_mode_switches_on_a_thermostat_that_is_off(
     hass: HomeAssistant, set_temperature_calls, set_hvac_mode_calls
 ) -> None:
@@ -241,13 +252,56 @@ async def test_buffer_is_read_from_the_heat_pump_setpoint(hass: HomeAssistant) -
     hass.states.async_set(HEAT_PUMP, "heat", {"temperature": 30.0, "current_temperature": 55.7})
     entry = await add_room(hass, **{CONF_BUFFER_ENTITY: HEAT_PUMP})
     assert float(hass.states.get(BUFFER).state) == 30.0
-    # In auto mode the pump exposes no setpoint, so the last value stays in use.
-    hass.states.async_set(HEAT_PUMP, "auto", {"current_temperature": 55.7})
-    await tick(hass, entry)
-    assert float(hass.states.get(BUFFER).state) == 30.0
+    # During an outage the set temperature has most likely not changed.
     hass.states.async_set(HEAT_PUMP, "unavailable")
     await tick(hass, entry)
     assert float(hass.states.get(BUFFER).state) == 30.0
+
+
+async def test_heat_pump_on_its_weather_curve_uses_the_typical_value(hass: HomeAssistant) -> None:
+    set_thermostat(hass)
+    hass.states.async_set(HEAT_PUMP, "heat", {"temperature": 30.0, "current_temperature": 55.7})
+    entry = await add_room(hass, **{CONF_BUFFER_ENTITY: HEAT_PUMP, CONF_BUFFER_FALLBACK: 36.0})
+    assert float(hass.states.get(BUFFER).state) == 30.0
+    # In auto mode the pump exposes no setpoint, so the old one must not stay in use.
+    hass.states.async_set(HEAT_PUMP, "auto", {"current_temperature": 55.7})
+    await tick(hass, entry)
+    assert float(hass.states.get(BUFFER).state) == 36.0
+    # An outage in auto mode must not bring the old setpoint back.
+    hass.states.async_set(HEAT_PUMP, "unavailable")
+    await tick(hass, entry)
+    assert float(hass.states.get(BUFFER).state) == 36.0
+    hass.states.async_set(HEAT_PUMP, "heat", {"temperature": 32.0})
+    await tick(hass, entry)
+    assert float(hass.states.get(BUFFER).state) == 32.0
+
+
+async def test_old_setpoint_saved_before_a_restart_is_dropped_in_auto_mode(hass: HomeAssistant, hass_storage) -> None:
+    set_thermostat(hass)
+    hass.states.async_set(HEAT_PUMP, "auto", {"current_temperature": 40.0})
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Pilot",
+        unique_id=THERMOSTAT,
+        data={
+            "name": "Pilot",
+            CONF_THERMOSTAT: THERMOSTAT,
+            CONF_TARGET: 21.0,
+            CONF_BUFFER_ENTITY: HEAT_PUMP,
+            CONF_BUFFER_FALLBACK: 36.0,
+            CONF_PHASE_OFFSET: 0,
+        },
+    )
+    entry.add_to_hass(hass)
+    hass_storage[f"{DOMAIN}.{entry.entry_id}"] = {
+        "version": 1,
+        "minor_version": 1,
+        "key": f"{DOMAIN}.{entry.entry_id}",
+        "data": {"runner": {"mode": "observe"}, "log": {"rows": [], "current": None}, "last_buffer": 30.0},
+    }
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    assert float(hass.states.get(BUFFER).state) == 36.0
 
 
 async def test_buffer_fallback_without_any_reading(hass: HomeAssistant) -> None:

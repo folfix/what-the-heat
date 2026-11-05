@@ -12,13 +12,13 @@
           "thermostat": "Thermostat",
           "target": "Target temperature",
           "buffer_entity": "Heat pump or buffer entity",
-          "buffer_fallback": "Buffer temperature when no reading is available",
+          "buffer_fallback": "Typical buffer temperature",
           "outdoor_entity": "Outdoor temperature sensor",
           "phase_offset": "Delay of the first cycle"
         },
         "data_description": {
           "buffer_entity": "For a climate entity its set temperature is used, and for other entities their value.",
-          "buffer_fallback": "Used when the entity above is empty and no earlier reading exists.",
+          "buffer_fallback": "Used while the heat pump exposes no set temperature, for example on its own weather curve. Keep it within about 2 °C of the real value.",
           "outdoor_entity": "Only logged for now, for learning later.",
           "phase_offset": "Set different values for different rooms, so that they do not all open together."
         }
@@ -31,13 +31,13 @@
         "title": "Room settings",
         "data": {
           "buffer_entity": "Heat pump or buffer entity",
-          "buffer_fallback": "Buffer temperature when no reading is available",
+          "buffer_fallback": "Typical buffer temperature",
           "outdoor_entity": "Outdoor temperature sensor",
           "phase_offset": "Delay of the first cycle"
         },
         "data_description": {
           "buffer_entity": "For a climate entity its set temperature is used, and for other entities their value.",
-          "buffer_fallback": "Used when the entity above is empty and no earlier reading exists.",
+          "buffer_fallback": "Used while the heat pump exposes no set temperature, for example on its own weather curve. Keep it within about 2 °C of the real value.",
           "outdoor_entity": "Only logged for now, for learning later.",
           "phase_offset": "Set different values for different rooms, so that they do not all open together."
         }

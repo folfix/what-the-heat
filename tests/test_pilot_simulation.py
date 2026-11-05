@@ -69,6 +69,14 @@ class PilotRoomTest(unittest.TestCase):
                 self.assertGreaterEqual(result.within_band_pct, 90.0)
                 self.assertLess(result.first_days_high, TARGET + 0.6)
 
+    def test_small_error_in_the_assumed_buffer_is_tolerated(self) -> None:
+        for label, (parameters, ground) in ROOMS.items():
+            for error in (-2.0, 2.0):
+                with self.subTest(room=label, error=error):
+                    environment = Environment(buffer_setpoint=34.0, ground=ground)
+                    result = simulate(parameters, environment, TARGET, assumed_buffer=34.0 + error, days=21.0, settle_days=7.0)
+                    self.assertGreaterEqual(result.within_band_pct, 90.0)
+
     def test_unreachable_target_saturates_without_alarm_from_the_watchdog(self) -> None:
         parameters, ground = ROOMS["high losses"]
         result = simulate(parameters, Environment(buffer_setpoint=30.0, ground=ground), TARGET)
