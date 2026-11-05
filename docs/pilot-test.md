@@ -51,7 +51,7 @@ While in Active mode:
 
 ## 5. What to watch
 
-The **What the Heat** page in the sidebar shows the main values for all rooms. Each room also has a thermostat entity for a regular tile or thermostat card on a dashboard, which changes the target and the mode.
+The **What the Heat** page in the sidebar shows the main values for all rooms, and its own version in the header. Each room also has a thermostat entity for a regular tile or thermostat card on a dashboard, which changes the target and the mode.
 
 | Entity | Meaning |
 |---|---|

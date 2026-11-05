@@ -5,6 +5,7 @@
 (() => {
   const PLATFORM = "what_the_heat";
   const ELEMENT = "what-the-heat-panel";
+  const VERSION = document.currentScript ? new URL(document.currentScript.src).searchParams.get("v") : null;
   const CONFIRM_MS = 5000;
   const MODES = [
     ["observe", "Observe"],
@@ -45,6 +46,7 @@
       color: var(--app-header-text-color, #fff);
     }
     h1 { margin: 0; font-size: 20px; font-weight: 400; }
+    .version { margin-left: auto; font-size: 12px; opacity: 0.7; }
     main { max-width: 1280px; margin: 0 auto; padding: 16px; }
     .card {
       background: var(--card-background-color, #fff);
@@ -205,7 +207,7 @@
       const menu = customElements.get("ha-menu-button") ? "<ha-menu-button></ha-menu-button>" : "";
       this.shadowRoot.innerHTML = `
         <style>${STYLE}</style>
-        <header>${menu}<h1>What the Heat</h1></header>
+        <header>${menu}<h1>What the Heat</h1>${VERSION ? `<span class="version">${escapeHtml(VERSION)}</span>` : ""}</header>
         <main>${rooms.length ? this._summary(rooms) + `<div class="rooms">${rooms.map((room) => this._room(room)).join("")}</div>` : this._empty()}</main>
       `;
       const button = this.shadowRoot.querySelector("ha-menu-button");
@@ -383,5 +385,13 @@
     }
   }
 
-  if (!customElements.get(ELEMENT)) customElements.define(ELEMENT, WhatTheHeatPanel);
+  // A page left open across an update loads this file again, and an element cannot be
+  // defined twice, so the new code replaces the methods of the class already registered.
+  const registered = customElements.get(ELEMENT);
+  if (registered) {
+    const { constructor, ...members } = Object.getOwnPropertyDescriptors(WhatTheHeatPanel.prototype);
+    Object.defineProperties(registered.prototype, members);
+  } else {
+    customElements.define(ELEMENT, WhatTheHeatPanel);
+  }
 })();

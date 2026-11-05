@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 DOMAIN = "what_the_heat"
-VERSION = "0.5.1"
+VERSION = "0.5.2"
 PLATFORMS = ["binary_sensor", "button", "climate", "number", "select", "sensor"]
 
 CONF_THERMOSTAT = "thermostat"
