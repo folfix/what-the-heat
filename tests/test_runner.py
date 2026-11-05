@@ -60,7 +60,7 @@ class ActiveModeTest(unittest.TestCase):
     def test_setpoint_is_written_once_per_change(self) -> None:
         zone = runner()
         total = 0
-        for minute in range(30):
+        for minute in range(20):
             step = zone.step(minute * MINUTE, reading(temperature=20.0, setpoint=OPEN, hvac_action="heating"))
             total += len(step.commands)
         self.assertEqual(total, 0)

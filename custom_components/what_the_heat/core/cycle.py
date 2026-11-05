@@ -9,10 +9,11 @@ from dataclasses import dataclass
 class CycleConfig:
     """Timing limits for the valve."""
 
-    min_cycle_s: float = 90 * 60.0
+    min_cycle_s: float = 30 * 60.0
     max_cycle_s: float = 180 * 60.0
-    min_on_s: float = 12 * 60.0
-    min_off_s: float = 12 * 60.0
+    # An actuator takes 2 to 3 minutes to move, so a shorter pulse passes little or no water.
+    min_on_s: float = 5 * 60.0
+    min_off_s: float = 5 * 60.0
 
 
 def cycle_length_s(duty_percent: float, config: CycleConfig) -> float:

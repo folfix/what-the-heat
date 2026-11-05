@@ -2,12 +2,13 @@
 
 import unittest
 
+from custom_components.what_the_heat.core.cycle import CycleConfig
 from custom_components.what_the_heat.core.valve import ValveConfig
 from custom_components.what_the_heat.core.zone import ZoneStatus
 from tests.simulation.harness import DAY_S, Environment, Faults, simulate
 from tests.simulation.pilot import ROOMS, TARGET
 
-MINIMUM_RUN_S = 12 * 60.0 - 60.0  # one simulation step of tolerance
+MINIMUM_RUN_S = CycleConfig().min_on_s - 60.0  # one simulation step of tolerance
 
 
 class PilotRoomTest(unittest.TestCase):

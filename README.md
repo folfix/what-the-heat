@@ -18,7 +18,7 @@ Each room runs on its own, once a minute:
 1. **Read:** the room temperature comes from the thermostat and is smoothed over about 10 minutes.
 2. **Calculate demand:** a PI controller works out how much heat the room needs from the distance to the target and how long it has lasted.
 3. **Convert to duty:** demand becomes the share of time the valve should be open. The hotter the water, the shorter the opening.
-4. **Plan cycles:** the duty is split into cycles of 90 to 180 minutes, with at least 12 minutes open and 12 minutes closed. On-time too short to run moves to the next cycle.
+4. **Plan cycles:** the duty is split into cycles of 30 minutes, longer only at very low or very high duty, up to 180 minutes, with at least 5 minutes open and 5 minutes closed. An actuator takes 2 to 3 minutes to move, so a shorter pulse would pass little water. On-time too short to run moves to the next cycle.
 5. **Move the valve:** a setpoint of target + 3 °C makes the thermostat open it, and target - 3 °C makes it close. A watchdog checks that the thermostat followed, and repeats the command if not. The thermostat's own dead zone should be at most about 2.5 °C, or these setpoints may not switch it while the room is near its target.
 
 If everything stops, the thermostat keeps its last setpoint and holds the room near it. Outside that band the thermostat acts on its own, so the room stays safe.
@@ -28,7 +28,7 @@ If everything stops, the thermostat keeps its last setpoint and holds the room n
 | Mode | What it does | Writes to the thermostat |
 |---|---|---|
 | **Observe** | Calculates and measures only. The default for a new room, and useful as a baseline. | Never, apart from returning the target once when leaving Active |
-| **Active** | Controls the thermostat as described above, and keeps it switched on and heating. | About 30 times a day |
+| **Active** | Controls the thermostat as described above, and keeps it switched on and heating. | About 100 times a day |
 | **Hand back** | Gives the plain target to the thermostat, which then regulates on its own. | Once |
 
 ### Water temperature

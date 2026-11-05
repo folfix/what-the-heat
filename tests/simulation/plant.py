@@ -63,7 +63,7 @@ class Room:
 class Actuator:
     """Thermal valve actuator. Water flows only once it is mostly open."""
 
-    def __init__(self, open_s: float = 210.0, close_s: float = 210.0, flow_from: float = 0.85) -> None:
+    def __init__(self, open_s: float = 150.0, close_s: float = 150.0, flow_from: float = 0.85) -> None:
         self._open_s = open_s
         self._close_s = close_s
         self._flow_from = flow_from

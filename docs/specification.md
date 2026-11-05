@@ -64,7 +64,7 @@ The guiding principle **[REQUIREMENT]**: it is better to use a low water tempera
 |---|---|---|
 | Home Assistant | HA OS on Home Assistant Yellow (Raspberry Pi CM5, 16 GB RAM), 250 GB NVMe | Plenty of capacity. The control core still stays dependency-free. |
 | Thermostats | Meross MTS200, one per room, Wi-Fi, local control through the Meross LAN custom integration | See section 3.1. **[TODO]** room list, `climate` entities, targets. |
-| Valve actuators | Driven directly by the thermostat relay | **[TODO]** type and travel time (assumed 3.5 minutes). |
+| Valve actuators | Driven directly by the thermostat relay | Wax actuators that tolerate frequent movement and take 2 to 3 minutes to move, according to the owner. Not measured. |
 | Heat pump | Samsung EHS Mono, 12 kW | Not used by the integration. See section 3.2. |
 | Buffer and mixing valves | About 200 L buffer, one three-way mixing valve per floor, fixed at 30 °C | The value is a global setting of the integration (6.6). |
 | Manifold pump | Unknown | **[TODO]** behaviour when all loops are closed (bypass, relief valve, pump stop). |
@@ -146,7 +146,7 @@ Lessons from its issue tracker: thermostats may ignore `hvac_mode: off` and rema
 3. **A physical two-node model cannot be identified from air temperature alone.** Fitted floor parameters were off by up to a factor of ten, although short-term predictions of air temperature were good. A daily heat balance recovers the useful quantities far more reliably.
 4. **Learning belongs in small, explainable layers.** Data per room is limited to weeks, and a neural network offers little here.
 5. **A low, fixed water temperature fits the goal.** Stable water gave very even control and long open times in simulation. The limit is demand: rooms with high losses cannot reach the target in cold weather (8.7).
-6. **A 20/20 minute cycle brings no visible benefit** over longer cycles, at more than twice the writes: 72 writes per day against 32 at 50% duty.
+6. **Short cycles cost writes.** An early simulation saw no visible benefit from a 20/20 minute cycle, at 72 writes per day against 32 at 50% duty. Later runs with the implemented controller did show one (8.8), and the owner chose a 30 minute window for smoother modulation.
 7. **Absolute results depend heavily on assumptions.** Solar overshoot at 1 kW was +1.8 °C in one model and +0.44 °C in another. The ranking of the variants was more stable than the numbers.
 
 ---
@@ -195,9 +195,10 @@ Worked example with `k1 = 0.27`, `k3 = 0.94`, target 21 °C, 3 °C outdoors: `L 
 - PID in normalised power units, so that the duty scales correctly with the water temperature. Integration pauses at saturation, while a window is open, without valid data, and when the thermostat acts outside the L0 band.
 - Until `k3` is learned, the floor is assumed to be 3 K warmer than the air when scaling for the water temperature.
 - Integration runs four times faster while the error exceeds 0.3 K. Without this, a room recovering from a cold start crawls over the last degree for many hours, because the integral starts near zero. No initial estimate of the room's demand is needed. The integral is kept across restarts, so a room that was switched off recovers faster.
-- Cycle length: `max(90, 12 / d, 12 / (1 - d))` minutes, capped at 180, where `d` is the duty as a fraction. This gives the algorithm-selected frequency required in 2.3: never a pulse shorter than 12 minutes, and longer cycles at extreme duties.
+- Cycle length: `max(30, 5 / d, 5 / (1 - d))` minutes, capped at 180, where `d` is the duty as a fraction. This gives the algorithm-selected frequency required in 2.3: never a pulse shorter than 5 minutes, and longer cycles at extreme duties.
+- The 5 minutes leave an actuator, which takes 2 to 3 minutes to move, time to pass water. The minimum stays although the actuators tolerate frequent movement, because a shorter pulse would pass little or none.
 - On-time that is too short to run is carried over to the next cycle.
-- Above about 87% duty the valve simply stays open, which also means fewer writes.
+- Above about 97% duty the valve simply stays open, which also means fewer writes.
 - Zones are staggered in phase, so the load stays even and the loops do not all close at once. Zones are not run strictly in sequence, since heating several at once is better for the source.
 
 ### 6.5 L2: prediction
@@ -277,9 +278,9 @@ docs/
 | `kp` | 80 %/K | pilot simulation (hass-ufh-controller: 50) |
 | `ki` | 0.0005 %/(K·s), i.e. 1.8% per K·h | pilot simulation (hass-ufh-controller: 0.001) |
 | Faster integration | 4 times, while the error exceeds 0.3 K | pilot simulation |
-| Cycle length | 90-180 min | simulation |
-| Minimum open and closed time | 12 min | hass-ufh-controller (9 min) plus margin |
-| Actuator travel | 3.5 min, to be measured | hass-ufh-controller |
+| Cycle length | 30-180 min | owner, compared in simulation (8.8) |
+| Minimum open and closed time | 5 min | actuator travel plus time to pass water |
+| Actuator travel | 2-3 min, not measured | owner |
 | Setpoint band | target ±3 °C | this project, wider than the thermostat's dead zone |
 | Outdoor lead | 2 h | simulation |
 | Floor offset filter | 3 h | simulation |
@@ -294,7 +295,7 @@ docs/
 
 ## 8. Simulation evidence
 
-Common assumptions: a 20 m² reference room scaled by area, three thermal nodes (screed, air, wall mass) with 60% of solar gain landing on the floor, screed 0.65 kWh/K, actuators 3.5 minutes with flow at 85% position, sensor resolution 0.1 °C. The controller sees room air temperature, water temperature, valve state and forecasts. The controller and the fits assume a simpler model than the plant. Results vary by several points between runs. The complete system (learning and several rooms on one heat source) has not yet been simulated as one.
+Common assumptions: a 20 m² reference room scaled by area, three thermal nodes (screed, air, wall mass) with 60% of solar gain landing on the floor, screed 0.65 kWh/K, actuators 3.5 minutes with flow at 85% position, sensor resolution 0.1 °C. The controller sees room air temperature, water temperature, valve state and forecasts. The controller and the fits assume a simpler model than the plant. Results vary by several points between runs. The complete system (learning and several rooms on one heat source) has not yet been simulated as one. Unless stated otherwise, the results below predate the ±3 °C band, the 30 minute window, the 5 minute minimum and the 2.5 minute actuators, and were not recomputed.
 
 ### 8.1 Floor temperature is not needed
 
@@ -395,6 +396,20 @@ Stable water, 21 °C target, wall losing heat to the ground. Time within ±0.3 �
 
 Where it holds, stable water keeps most of these rooms within about ±0.15 °C. Where it does not, the water simply cannot deliver enough heat, and no control can change that. The real limit of each room still has to be measured.
 
+### 8.8 Window length
+
+Compared on the simulator with the implemented controller and 2.5 minute actuators, for five room types at a 21 °C target: water at 34 °C with outdoor means of 15, 3 and -8 °C, and water at 30 °C with 3 °C. The first column is the earlier setting.
+
+| | 90 min window, 12 min minimum | 30 min window, 5 min minimum |
+|---|---|---|
+| RMS deviation | 0.04-0.13 °C | 0.03-0.12 °C |
+| Longest closed period | up to 7.0 h, in mild weather | up to 1.8 h |
+| Setpoint writes per day | up to 32 | up to 96 |
+
+These ranges leave out a room with heavy air near its limit, at about 90% duty, where the window made little difference to the RMS deviation: 0.30 against 0.28 °C at 34 °C water and -8 °C, and 0.21 against 0.22 °C at 30 °C water and 3 °C. In that second case the time within ±0.3 °C fell from 100% to 76%. A 3 minute minimum gave nearly the same results as 5 minutes.
+
+A rough figure for a real room: on a plain thermostat, the reading of one room moved about 0.6 K/h in both directions and reacted within about 10 to 20 minutes. At 50% duty that suggests a swing of about 0.15 K with this window, against about 0.45 K with 90 minutes. This comes from the slope and has not been measured under the controller.
+
 ---
 
 ## 9. Roadmap
@@ -445,6 +460,7 @@ All based on what can be measured: air temperature and valve state.
 | The water is too cold for a room in cold weather | The room stays fully open and below target. Raise the temperature by hand, on the valves and in the setting. See 8.7. |
 | The global setting differs from the real water temperature, or the buffer falls below the mixing setpoint | The integral compensates a steady difference. See 8.6 for the tolerance. |
 | Learning degrades a room | Bounds, trust threshold, fallback to PID, per-room switch |
+| Frequent setpoint writes wear out a thermostat | About 96 writes a day per room with the 30 minute window. Whether the device stores each one in flash memory, and how long that lasts, is unknown. If it matters, lengthen the window. |
 | Integration bug affects Home Assistant, since it runs in-process | Async only, no blocking work, core tested separately |
 | Short cycling of the compressor at low load | Phase staggering, longer open times. Partly limited by hardware. |
 | All loops closed with the manifold pump running | Stage 0 check, phase staggering |
