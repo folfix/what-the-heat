@@ -39,21 +39,21 @@ class ZoneClimate(ZoneEntity, ClimateEntity):
     _attr_hvac_modes = [HVACMode.HEAT]
     _attr_max_temp = MAX_TARGET
     _attr_min_temp = MIN_TARGET
+    _attr_native_temperature_unit = UnitOfTemperature.CELSIUS
     _attr_preset_modes = [mode.value for mode in Mode]
     _attr_supported_features = ClimateEntityFeature.TARGET_TEMPERATURE | ClimateEntityFeature.PRESET_MODE
     _attr_target_temperature_step = TARGET_STEP
-    _attr_temperature_unit = UnitOfTemperature.CELSIUS
 
     def __init__(self, coordinator: ZoneCoordinator) -> None:
         super().__init__(coordinator, "zone")
 
     @property
-    def current_temperature(self) -> float | None:
+    def native_current_temperature(self) -> float | None:
         """Return the room temperature."""
         return self.coordinator.data.reading.temperature
 
     @property
-    def target_temperature(self) -> float:
+    def native_target_temperature(self) -> float:
         """Return the target."""
         return self.coordinator.runner.target
 

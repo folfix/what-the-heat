@@ -51,12 +51,20 @@ class DailyLogTest(unittest.TestCase):
     def test_state_survives_a_restart(self) -> None:
         log = DailyLog()
         log.add("2026-11-05", HOUR, target=21.0, temperature=21.0, is_heating=False)
-        log.add("2026-11-06", HOUR, target=21.0, temperature=21.0, is_heating=True, buffer=34.0, outdoor=3.0, is_active=True)
+        log.add("2026-11-06", HOUR, target=21.0, temperature=21.0, is_heating=True, water=34.0, outdoor=3.0, is_active=True)
         restored = DailyLog(**log.snapshot())
         self.assertEqual(restored.rows, log.rows)
         self.assertEqual(restored.today, log.today)
         restored.add("2026-11-06", HOUR, target=21.0, temperature=21.0)
         self.assertEqual(restored.today["hours"], 2.0)
+
+    def test_state_saved_by_an_older_version_loads(self) -> None:
+        log = DailyLog()
+        log.add("2026-11-06", HOUR, target=21.0, temperature=21.0)
+        state = log.snapshot()
+        state["current"] |= {"buffer_s": 3600.0, "buffer_sum": 122400.0}
+        restored = DailyLog(**state)
+        self.assertEqual(restored.today, log.today)
 
 
 if __name__ == "__main__":

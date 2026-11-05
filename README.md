@@ -2,11 +2,12 @@
 
 Makes water-based underfloor heating work like PWM, to eliminate the delay.
 
-A planned Home Assistant custom integration that keeps each room at its target temperature with the smallest possible deviation. It uses a low buffer temperature and loops that stay open for as long as possible.
+A Home Assistant custom integration that keeps each room at its target temperature with the smallest possible deviation, using loops that stay open for as long as possible at a low, fixed water temperature. Requires Home Assistant 2026.11 or newer.
 
 - **Per-room control:** a duty cycle applied through ordinary thermostat setpoints.
-- **Learning:** each room's losses, sun exposure and recurring gains are learned from its own data. No floor sensors are needed.
-- **Buffer control:** the heat pump setpoint follows the most demanding room and the weather forecast.
+- **No floor sensors:** floor temperature is never needed.
+- **No heat source control:** the water temperature is fixed by the mixing valves. The integration only needs to know its value.
+- **Learning (planned):** each room's losses, sun exposure and recurring gains, learned from its own data.
 
 ## How it works
 
@@ -30,21 +31,19 @@ If everything stops, the thermostat keeps its last setpoint and holds the room n
 | **Active** | Controls the thermostat as described above, and keeps it switched on and heating. | About 30 times a day |
 | **Hand back** | Gives the plain target to the thermostat, which then regulates on its own. | Once |
 
-### Buffer temperature
+### Water temperature
 
-Hot water delivers more heat in the same time, so the same demand needs a shorter opening. This is the only use of the buffer temperature for now: it scales the duty. The integration only reads it and never writes to the heat pump.
+This is one global setting for all rooms, by default 30 °C. Set it to what the mixing valves are set to, on the **What the Heat** page or with the service `what_the_heat.set_water_temperature`.
 
-| Heat pump | Value used |
-|---|---|
-| Fixed temperature | The set temperature, treated as the real buffer temperature |
-| On its own weather curve, exposing no set temperature | **Typical buffer temperature** from the settings |
-| Temporarily unavailable | The last set temperature, or the typical value if there is none |
+It only tells the controller what the temperature is: hot water delivers more heat in the same time, so the same demand needs a shorter opening. Nothing is read from or written to the mixing valves, the buffer or the heat pump.
 
-Stay within about 2 °C of the real value. In simulation that barely changes the results, while at 4 °C some rooms get clearly worse. If the set temperature exceeds the 38 °C limit, the **Problem** sensor turns on. Nothing else happens, since the integration does not control the heat pump.
+Keep it within about 2 °C of the real value. In simulation that barely changes the results, while at 4 °C some rooms get clearly worse.
+
+If a room stays at 100% and below its target, the water cannot deliver enough heat for it. The integration cannot fix that, so the temperature has to be raised by hand, on the valves and in the setting.
 
 ### Not there yet
 
-Prediction from the weather forecast, per-room learning, and setting the heat pump temperature are designed and simulated, but not implemented. See the [specification](docs/specification.md).
+Prediction from the weather forecast and per-room learning are designed and simulated, but not implemented. See the [specification](docs/specification.md).
 
 ### Where to see it
 
@@ -55,7 +54,7 @@ Prediction from the weather forecast, per-room learning, and setting the heat pu
 
 ## Status
 
-Early development, ready for a first test on one room. So far it has PI control and valve cycles only, without prediction, learning or buffer control. It has been tested against simulated rooms and a stand-in thermostat, but not yet on a real device. Figures in the specification come from simulations with assumed room data and have not been verified in a real house.
+Early development, ready for a first test on one room. So far it has PI control and valve cycles only, without prediction or learning. It runs on a real thermostat in a first test, and has otherwise been tested against simulated rooms and a stand-in thermostat. Figures in the specification come from simulations with assumed room data and have not been verified in a real house.
 
 - [Pilot test](docs/pilot-test.md): installation and how to run the test.
 - [Specification](docs/specification.md): requirements, architecture, parameters, simulation results and the roadmap.

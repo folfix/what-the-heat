@@ -10,11 +10,11 @@ All simulation figures in this document come from throwaway models with assumed 
 
 ## 1. Goal
 
-Keep each room at its target temperature with the smallest possible deviation, using a low buffer temperature and loops that stay open for as long as possible.
+Keep each room at its target temperature with the smallest possible deviation, using loops that stay open for as long as possible at a low, fixed water temperature.
 
-Today each room runs a plain on/off thermostat with a 0.3 °C differential. That heats the screed in bursts and ignores the large thermal inertia of the floor, the sun and the buffer temperature.
+Today each room runs a plain on/off thermostat with a 0.3 °C differential. That heats the screed in bursts and ignores the large thermal inertia of the floor, the sun and the water temperature.
 
-The guiding principle **[REQUIREMENT]**: it is better to lower the buffer temperature and keep a loop open nearly 100% of the time than to hold a high buffer temperature and run rare, short cycles.
+The guiding principle **[REQUIREMENT]**: it is better to use a low water temperature and keep a loop open nearly 100% of the time than to use hot water and run rare, short cycles.
 
 ---
 
@@ -23,7 +23,7 @@ The guiding principle **[REQUIREMENT]**: it is better to lower the buffer temper
 ### 2.1 Current state
 - **[REQUIREMENT]** Water-based underfloor heating. Every room has a thermostat and every thermostat is connected to Home Assistant.
 - **[REQUIREMENT]** A thermostat is normally set to about 21 °C with a 0.3 °C differential.
-- **[REQUIREMENT]** The heat source is a heat pump with a buffer. The buffer temperature follows the temperature set on the heat pump, and it can be read and written from Home Assistant.
+- **[REQUIREMENT]** The heat source is a heat pump with a buffer. Each floor has a three-way mixing valve that sets the temperature of the water going into its loops.
 - **[REQUIREMENT]** There are no floor sensors. Floor temperature is unknown and will stay unknown.
 
 ### 2.2 Predictive switching
@@ -31,20 +31,20 @@ The guiding principle **[REQUIREMENT]**: it is better to lower the buffer temper
 - **[REQUIREMENT]** When a room temperature gradually falls, open the loop earlier than the thermostat would, by raising the thermostat setpoint from Home Assistant.
 - **[REQUIREMENT]** Likewise close the loop earlier, because the floor keeps releasing heat for a long time.
 - **[REQUIREMENT]** Take time of day and the sun into account.
-- **[REQUIREMENT]** Take the buffer temperature into account.
+- **[REQUIREMENT]** Take the water temperature into account.
 
 ### 2.3 Loop modulation, like an induction hob (preferred)
-- **[REQUIREMENT]** Loops open and close at a frequency chosen by the algorithm, for example 20 minutes open and 20 minutes closed at 35 °C in the buffer.
+- **[REQUIREMENT]** Loops open and close at a frequency chosen by the algorithm, for example 20 minutes open and 20 minutes closed.
 - **[REQUIREMENT]** The floor is never cold, and heating it from cold is avoided.
 - **[REQUIREMENT]** Control still works through thermostat setpoints from Home Assistant.
 
 ### 2.4 Learning
-- **[REQUIREMENT]** A learning algorithm studies each room individually and adapts the parameters accordingly. The buffer temperature and external factors such as the sun matter.
+- **[REQUIREMENT]** A learning algorithm studies each room individually and adapts the parameters accordingly. The water temperature and external factors such as the sun matter.
 
-### 2.5 Buffer control
-- **[REQUIREMENT]** The heat pump may run at a fixed temperature, and the algorithm may set that temperature, which equals the buffer temperature.
-- **[REQUIREMENT]** To keep things simple, the temperature set on the heat pump is treated as the real buffer temperature.
-- **[REQUIREMENT]** The buffer temperature must not exceed 38 °C.
+### 2.5 Water temperature
+- **[REQUIREMENT]** The mixing valves are set by hand to a fixed temperature, currently 30 °C.
+- **[REQUIREMENT]** The integration neither reads nor changes the buffer or the heat pump. Modulating the buffer temperature is dropped.
+- **[REQUIREMENT]** The water temperature is one global setting.
 
 ### 2.6 Repository
 - **[REQUIREMENT]** The solution is built from scratch. Existing projects serve as references.
@@ -65,10 +65,10 @@ The guiding principle **[REQUIREMENT]**: it is better to lower the buffer temper
 | Home Assistant | HA OS on Home Assistant Yellow (Raspberry Pi CM5, 16 GB RAM), 250 GB NVMe | Plenty of capacity. The control core still stays dependency-free. |
 | Thermostats | Meross MTS200, one per room, Wi-Fi, local control through the Meross LAN custom integration | See section 3.1. **[TODO]** room list, `climate` entities, targets. |
 | Valve actuators | Driven directly by the thermostat relay | **[TODO]** type and travel time (assumed 3.5 minutes). |
-| Heat pump | Samsung EHS Mono, 12 kW, through the SmartThings integration (cloud) | See section 3.2. **[TODO]** minimum modulation power. |
-| Buffer | About 200 L | Its set temperature is treated as the real temperature (2.5). |
+| Heat pump | Samsung EHS Mono, 12 kW | Not used by the integration. See section 3.2. |
+| Buffer and mixing valves | About 200 L buffer, one three-way mixing valve per floor, fixed at 30 °C | The value is a global setting of the integration (6.6). |
 | Manifold pump | Unknown | **[TODO]** behaviour when all loops are closed (bypass, relief valve, pump stop). |
-| Floors | No floor sensors | The 38 °C buffer limit is the only firm protection for the floor. |
+| Floors | No floor sensors | The temperature set on the mixing valves is what protects the floor. |
 | Outdoor temperature | Sonoff SNZB-02P over Zigbee, placed in the shade | Primary outdoor reading. Weak link margin (about -89 dBm) and 42% battery seen, so a fallback is required. |
 | Weather | AccuWeather integration | Hourly forecast with cloud coverage. |
 | History | **[TODO]** recorder retention | Learning needs at least 14 days of data. Extend retention now. |
@@ -83,19 +83,18 @@ The guiding principle **[REQUIREMENT]**: it is better to lower the buffer temper
 - A `Lock` entity, a window-open binary sensor and a tracked-sensor option exist. Their behaviour is still to be verified.
 - How the device stores setpoints in flash, and the resulting wear, could not be determined. Write counts will be logged.
 
-### 3.2 Samsung EHS through SmartThings (checked in the Home Assistant source and on the device)
-- In `auto` mode (expected to be the weather-compensation curve, to be confirmed) the integration does not expose a target temperature. In `heat` mode it does, so buffer control requires `heat` mode. While the pump is in `auto`, the controller works from a configured typical buffer temperature.
-- The climate entity's current temperature read 55-58 °C while the diverter valve was on the tank. It is not the buffer temperature. Its meaning while heating the room is **[TODO]**.
-- The diverter valve position (`room` or `tank`) shows domestic hot water (DHW) periods, during which the buffer is not charged.
-- `Power` and `Energy` sensors allow energy baselines and compressor start detection.
-- It is a cloud integration. On the day this was written the heat pump entities were unavailable for over three hours. Nothing critical may depend on it.
-- Two earlier automations that acted on the heat pump have been disabled by the owner and no longer affect the setpoint.
+### 3.2 Samsung EHS
+
+The integration does not use the heat pump. What was found before this decision, for the record:
+
+- The current temperature of its SmartThings climate entity is the water leaving the pump, not the buffer. No source was found showing that the EHS exposes a buffer temperature. The standard sensor kit lists sensors for the hot water tank and a mixing valve.
+- SmartThings is a cloud service. On one observed day the heat pump entities were unavailable for over three hours.
 
 ---
 
 ## 4. Prior art
 
-No project combines per-room duty cycling, buffer temperature derived from zone demand, and solar prediction. Parts exist in several projects. Both projects below are MIT licensed, so any reused code must keep the attribution.
+No project combines per-room duty cycling on plain thermostats, per-room learning and solar prediction. Parts exist in several projects. Both projects below are MIT licensed, so any reused code must keep the attribution.
 
 ### 4.1 lnagel/hass-ufh-controller (read: documentation and source)
 Built specifically for water-based underfloor heating.
@@ -109,7 +108,7 @@ Adopted as a reference:
 - Simulation tests running the real controller with no Home Assistant dependency.
 
 Not adopted:
-- Time windows aligned to midnight, where every zone with remaining quota opens at the start of the window. In the simulations here, starting zones together gave worse comfort and a higher buffer temperature.
+- Time windows aligned to midnight, where every zone with remaining quota opens at the start of the window. In the simulations here, starting zones together gave worse comfort.
 - A single-node room model in simulations, which hides the screed delay.
 - It needs a `switch` per valve rather than a `climate` entity.
 
@@ -146,10 +145,9 @@ Lessons from its issue tracker: thermostats may ignore `hvac_mode: off` and rema
 2. **Floor temperature is not needed for control.** Results without it were nearly the same as with it, even with a fixed estimate (table 8.1).
 3. **A physical two-node model cannot be identified from air temperature alone.** Fitted floor parameters were off by up to a factor of ten, although short-term predictions of air temperature were good. A daily heat balance recovers the useful quantities far more reliably.
 4. **Learning belongs in small, explainable layers.** Data per room is limited to weeks, and a neural network offers little here.
-5. **The buffer should follow the most demanding room.** Compared with a fixed 40 °C it lowers the buffer temperature by up to about 11 K without losing comfort.
-6. **Buffer control based only on measured duty is dangerous at high targets.** A reactive rule aiming for 90-100% failed to raise the buffer in a cold spell, and rooms fell to about 16 °C. The buffer must come from a model and a forecast, guarded by room temperatures.
-7. **A 20/20 minute cycle brings no visible benefit** over longer cycles, at more than twice the writes: 72 writes per day against 32 at 50% duty.
-8. **Absolute results depend heavily on assumptions.** Solar overshoot at 1 kW was +1.8 °C in one model and +0.44 °C in another. The ranking of the variants was more stable than the numbers.
+5. **A low, fixed water temperature fits the goal.** Stable water gave very even control and long open times in simulation. The limit is demand: rooms with high losses cannot reach the target in cold weather (8.7).
+6. **A 20/20 minute cycle brings no visible benefit** over longer cycles, at more than twice the writes: 72 writes per day against 32 at 50% duty.
+7. **Absolute results depend heavily on assumptions.** Solar overshoot at 1 kW was +1.8 °C in one model and +0.44 °C in another. The ranking of the variants was more stable than the numbers.
 
 ---
 
@@ -160,9 +158,8 @@ Lessons from its issue tracker: thermostats may ignore `hvac_mode: off` and rema
 For each room:
 
 ```
-L          = k1 * (T_target - T_outdoor) - sun[hour] - gains[hour]
-buffer     = max over rooms of: T_target + k3 * L + L / open_target
-duty       = (L + pid_correction) / (buffer - T_room - k3 * L_filtered)
+L     = k1 * (T_target - T_outdoor) - sun[hour] - gains[hour]
+duty  = (L + pid_correction) / (T_water - T_room - k3 * L_filtered)
 ```
 
 - `L` is the heat a room needs, expressed in kelvin of water-to-floor temperature difference.
@@ -170,7 +167,7 @@ duty       = (L + pid_correction) / (buffer - T_room - k3 * L_filtered)
 - `sun[hour]` and `gains[hour]` are learned hourly profiles.
 - In `duty`, `L` uses the outdoor temperature forecast 2 hours ahead. `L_filtered` uses current values with a 3 hour low-pass filter, standing in for the unknown floor temperature.
 
-Worked example with `k1 = 0.27`, `k3 = 0.94`, target 21 °C, 3 °C outdoors: `L = 4.8` and `k3 * L = 4.5`. A 100% open target needs a buffer of 21 + 4.5 + 4.8 = 30.3 °C. At 34 °C the same loop would be open 56% of the time.
+Worked example with `k1 = 0.27`, `k3 = 0.94`, target 21 °C, 3 °C outdoors: `L = 4.8` and `k3 * L = 4.5`. At a water temperature of 34 °C the loop is open 56% of the time. At 30 °C it would need 107%, so this assumed room would stay fully open and fall slightly short of the target.
 
 ### 6.2 Layers
 
@@ -179,7 +176,6 @@ Worked example with `k1 = 0.27`, `k3 = 0.94`, target 21 °C, 3 °C outdoors: `L 
 | L0 Valve | Opens and closes the loop through the setpoint, with a watchdog | writes on change, checks every 5 min |
 | L1 Zone | PID, duty calculation, cycle scheduling across zones | 60 s |
 | L2 Prediction | Outdoor and solar feed-forward from the forecast | 30 min |
-| L3 Buffer | Computes the heat pump setpoint | 3 h |
 | Learning | Refits per-room parameters | nightly |
 
 ### 6.3 L0: valve
@@ -195,8 +191,8 @@ Worked example with `k1 = 0.27`, `k3 = 0.94`, target 21 °C, 3 °C outdoors: `L 
 
 ### 6.4 L1: zone
 
-- PID in normalised power units, so that the duty scales correctly with the buffer temperature. Integration pauses at saturation, while a window is open, without valid data, and when the thermostat acts outside the L0 band.
-- Until `k3` is learned, the floor is assumed to be 3 K warmer than the air when scaling for the buffer temperature.
+- PID in normalised power units, so that the duty scales correctly with the water temperature. Integration pauses at saturation, while a window is open, without valid data, and when the thermostat acts outside the L0 band.
+- Until `k3` is learned, the floor is assumed to be 3 K warmer than the air when scaling for the water temperature.
 - Integration runs four times faster while the error exceeds 0.3 K. Without this, a room recovering from a cold start crawls over the last degree for many hours, because the integral starts near zero. No initial estimate of the room's demand is needed. The integral is kept across restarts, so a room that was switched off recovers faster.
 - Cycle length: `max(90, 12 / d, 12 / (1 - d))` minutes, capped at 180, where `d` is the duty as a fraction. This gives the algorithm-selected frequency required in 2.3: never a pulse shorter than 12 minutes, and longer cycles at extreme duties.
 - On-time that is too short to run is carried over to the next cycle.
@@ -208,25 +204,23 @@ Worked example with `k1 = 0.27`, `k3 = 0.94`, target 21 °C, 3 °C outdoors: `L 
 - Outdoor temperature comes from the local sensor. The forecast contributes only its change: `T_out(+2 h) = sensor(now) + forecast(+2 h) - forecast(now)`. The forecast and the sensor differ (6.8 °C against 4.2 °C on one observed day), and a constant ±2.6 K error did not change the simulated result.
 - The solar signal is the hourly cloud forecast through the Kasten-Czeplak attenuation. Scaling by clear-sky irradiance for seasonal change is planned and not yet tested.
 
-### 6.6 L3: buffer
+### 6.6 Water temperature
 
-- Runs every 3 hours and computes the required temperature from the formula in 6.1, for each room, using the coldest outdoor temperature forecast over the next 6 hours and ignoring the sun, so that a cloudy morning is still covered.
-- The target is 100% open for the most demanding room. In simulation it settles at 85-91%, because of the guards below.
-- A trim corrects the model: +0.5 K when any room is more than 0.25 °C below target, -0.25 K when the most demanding zone is at least 10 points under the open target and no room is more than 0.1 °C below target. The trim is limited to ±5 K.
-- Rate limits: at most +2 K and -0.5 K per run. Setpoints are rounded to 0.5 °C.
-- Hard limit: 38 °C. Without floor sensors this is the only firm protection for the floor. A room that needs more stays at 100% open, and an alert is raised. Simulated cold spells reached 38-39 °C, so the limit may come into play in hard frost.
-- The heat pump setpoint is treated as the real buffer temperature, which also keeps L1 from chasing the pump's own hysteresis. No separate buffer sensor is used.
-- Rollout is advisory first: log the recommended setpoint, then write it.
+- One global value for all rooms, by default 30 °C, in the range 20-38 °C. It is set on the sidebar page or with the service `what_the_heat.set_water_temperature`, and must match the mixing valves.
+- It only tells the controller what the temperature is. Nothing is read from or written to the mixing valves, the buffer or the heat pump.
+- It scales the duty, since hotter water delivers the same heat in less time.
+- A room that needs more than the water can deliver stays fully open and below its target. Raising the temperature is then a manual step.
+- Buffer control was designed and simulated first (8.4), and dropped once the owner chose fixed mixing valves.
 
 ### 6.7 Learning
 
 Three layers per room, updated nightly from that room's own data. Before enough data exists, the room runs on PID alone.
 
-**Daily balance: `k1`, `k3` (and a starting value for the sun).** One row per day: fraction of time heating (from `hvac_action`), room temperature, outdoor temperature, buffer temperature, sun estimate. The fit uses a rolling 30 day window:
+**Daily balance: `k1`, `k3` (and a starting value for the sun).** One row per day: fraction of time heating (from `hvac_action`), room temperature, outdoor temperature, water temperature, sun estimate. The fit uses a rolling 30 day window:
 
 ```
 L    = k1 * (T_room - T_outdoor) - k2 * sun
-duty = L / (T_buffer - T_room - k3 * L)
+duty = L / (T_water - T_room - k3 * L)
 ```
 
 New values are blended in (85% old, 15% new). No deliberate cooling of rooms is needed, so step tests are optional.
@@ -241,11 +235,10 @@ New values are blended in (85% old, 15% new). No deliberate cooling of rooms is 
 
 | Failure | Behaviour |
 |---|---|
-| Home Assistant down | Thermostats keep the room near target ±2 °C. The heat pump keeps its last setpoint, with no weather compensation. A cold spell may cool rooms slowly. Needs an alert from outside Home Assistant, and manual return to `auto` during long outages. |
+| Home Assistant down | Thermostats keep the room near target ±2 °C. |
 | Integration unloaded or crashed | Thermostats get the plain target as setpoint and regulate on their own (hand-back). Heartbeat entity for monitoring. |
 | Thermostat unavailable | Zone reports unavailable instead of a false "off", and integration pauses. Other zones are unaffected. |
 | Room temperature stale | After 30 min the last duty is held. After 60 min the zone is handed back to the thermostat. |
-| SmartThings unavailable | L3 freezes, the last setpoint stays assumed, zones keep running, alert raised. |
 | Outdoor sensor lost | AccuWeather with the last known offset, alert after 2 h. |
 | Forecast lost | Current outdoor temperature is used, and solar feed-forward is disabled. |
 | Model not trusted | PID only. |
@@ -287,10 +280,7 @@ docs/
 | Setpoint band | target ±2 °C | this project |
 | Outdoor lead | 2 h | simulation |
 | Floor offset filter | 3 h | simulation |
-| Buffer run interval | 3 h, forecast 6 h ahead | simulation |
-| Buffer open target | 100% of the most demanding room | owner principle, simulation |
-| Buffer limit | 38 °C | owner |
-| Buffer rate limit | +2 K, -0.5 K per run | simulation |
+| Water temperature | 30 °C, one global value | owner |
 | Learning window | 30 days, minimum 14 days | simulation |
 | Solar and gains learning rate | 2 and 1 per day, deviation lag 2 h | simulation |
 | Model trust threshold | daily balance error under about 5 points | proposal, unverified |
@@ -301,11 +291,11 @@ docs/
 
 ## 8. Simulation evidence
 
-Common assumptions: a 20 m² reference room scaled by area, three thermal nodes (screed, air, wall mass) with 60% of solar gain landing on the floor, screed 0.65 kWh/K, actuators 3.5 minutes with flow at 85% position, sensor resolution 0.1 °C. The controller sees room air temperature, buffer temperature or setpoint, valve state and forecasts. The controller and the fits assume a simpler model than the plant. Results vary by several points between runs. The complete system (learning, buffer control and shared buffer together) has not yet been simulated as one.
+Common assumptions: a 20 m² reference room scaled by area, three thermal nodes (screed, air, wall mass) with 60% of solar gain landing on the floor, screed 0.65 kWh/K, actuators 3.5 minutes with flow at 85% position, sensor resolution 0.1 °C. The controller sees room air temperature, water temperature, valve state and forecasts. The controller and the fits assume a simpler model than the plant. Results vary by several points between runs. The complete system (learning and several rooms on one heat source) has not yet been simulated as one.
 
 ### 8.1 Floor temperature is not needed
 
-Fixed 36 °C buffer, outdoor 3 ±3 °C, sun every other day. Time within ±0.3 °C and temperature range:
+Fixed 36 °C water, outdoor 3 ±3 °C, sun every other day. Time within ±0.3 °C and temperature range:
 
 | Sun | Thermostat | PID only | Without floor temperature | With floor temperature (reference) |
 |---|---|---|---|---|
@@ -339,11 +329,11 @@ For comparison, ideal parameters gave 96% and PID alone 91%. Two-node floor para
 
 These runs used a learning rate of 1. A rate of 2 did better in the two rooms tested: 97% for the south room and 83% for the kitchen, against 95% and 78%. East, west and north rooms reached about 99%.
 
-The buffer temperature matters when it varies. With setpoint steps of ±3 K, learning that knows the buffer temperature reached 96.5%, and without it 79%.
+The water temperature matters when it varies. With steps of ±3 K, learning that knows the temperature reached 96.5%, and without it 79%. This is why the global setting must match the mixing valves.
 
-### 8.4 Buffer control
+### 8.4 Buffer control (dropped)
 
-Six zones with differing demand, 100 L buffer, sun on some zones, DHW twice a day. Values are for: stable 5 °C / cold front / -5 °C / thaw 8 °C.
+Kept for the record, since this design was replaced by fixed mixing valves. Six zones with differing demand, 100 L buffer, sun on some zones, DHW twice a day. Values are for: stable 5 °C / cold front / -5 °C / thaw 8 °C.
 
 | Control | Buffer (°C) | Within ±0.3 °C | Mean open | Most demanding zone open | Starts per day |
 |---|---|---|---|---|---|
@@ -363,11 +353,11 @@ Notes:
 
 ### 8.5 Manifold balancing
 
-Reducing flow in low-demand loops evens out opening times: with an open target of 90%, zone opening ranged 27-66% before and 49-68% after, and at a target of 100% it ranged 56-83%. Starts also fall. The controller can recommend flow changes from learned `k1` values. Adjusting the manifold remains a manual step.
+This ran with the buffer control above, but the principle does not depend on it. Reducing flow in low-demand loops evens out opening times: with an open target of 90%, zone opening ranged 27-66% before and 49-68% after, and at a target of 100% it ranged 56-83%. Starts also fall. The controller can recommend flow changes from learned `k1` values. Adjusting the manifold remains a manual step.
 
 ### 8.6 Pilot room
 
-This uses the simulator in this repository, with the implemented controller: PID and cycles only, no prediction or learning. Run it with `python -m tests.simulation.pilot`. The results cover seven assumed room types at a 30, 34 or 38 °C buffer with a 21 °C target, with the wall losing heat to the ground. One physically impossible case (high losses at 30 °C) is left out, where both variants stop at 19.6 °C. The thermostat is modelled as switching on at setpoint - 0.3 °C and off at the setpoint, which is an assumption about the real device.
+This uses the simulator in this repository, with the implemented controller: PID and cycles only, no prediction or learning. Run it with `python -m tests.simulation.pilot`. The results cover seven assumed room types at a water temperature of 30, 34 or 38 °C with a 21 °C target, with the wall losing heat to the ground. One physically impossible case (high losses at 30 °C) is left out, where both variants stop at 19.6 °C. The thermostat is modelled as switching on at setpoint - 0.3 °C and off at the setpoint, which is an assumption about the real device.
 
 | Steady state | Thermostat | Controller |
 |---|---|---|
@@ -380,11 +370,27 @@ This uses the simulator in this repository, with the implemented controller: PID
 Cold start, with the floor at air temperature, walls 1 K colder, and air at 13, 16 or 19 °C:
 - Peak above the target: at most +0.52 °C, close to the thermostat's +0.45 °C.
 - Time to come within 0.3 °C of the target: usually the same as the thermostat, since the valve is simply open during most of the recovery. The widest gap was 30 h against 12 h, with high losses at 34 °C.
-- Afterwards the room stays within the band at least 99% of the time, except for a room with heavy air at a 30 °C buffer, at 79-83%.
+- Afterwards the room stays within the band at least 99% of the time, except for a room with heavy air at 30 °C water, at 79-83%.
 
 Real basement walls and soil are likely to warm much more slowly than this model, so the first days in a real room will not be representative.
 
-Error in the assumed buffer temperature, over the same room types. At a real 34 or 38 °C and an error within ±2 K, the worst room stayed within the band 92-100% of the time. At ±4 K half of the rooms were still at 100%, but the worst fell to 51-95%. At ±6 K the worst fell to 22-71%. At a real 30 °C, where some rooms are near their limit, ±2 K already took the worst room to 67-72%.
+Error in the configured water temperature, over the same room types. At a real 34 or 38 °C and an error within ±2 K, the worst room stayed within the band 92-100% of the time. At ±4 K half of the rooms were still at 100%, but the worst fell to 51-95%. At ±6 K the worst fell to 22-71%. At a real 30 °C, where some rooms are near their limit, ±2 K already took the worst room to 67-72%.
+
+### 8.7 Fixed 30 °C water
+
+Stable water, 21 °C target, wall losing heat to the ground. Time within ±0.3 °C and mean duty, by outdoor temperature:
+
+| Room type | 8 °C | 3 °C | -5 °C | -10 °C |
+|---|---|---|---|---|
+| Reference | 100%, 46% | 100%, 60% | 100%, 82% | 100%, 96% |
+| Low losses | 100%, 18% | 100%, 22% | 100%, 29% | 100%, 34% |
+| High losses | 0%, stops at 20.1-20.7 °C | 0%, stops at 19.0-19.7 °C | 0%, stops at 17.4-18.0 °C | 0%, stops at 16.4-17.0 °C |
+| Cold ground | 100%, 62% | 100%, 77% | 99%, 97% | 0%, stops at 20.2-20.5 °C |
+| Slow floor | 100%, 57% | 100%, 76% | 27%, 100% | 0%, stops at 19.7-20.0 °C |
+| Light room | 100%, 41% | 100%, 54% | 100%, 79% | 100%, 93% |
+| Heavy air | 100%, 60% | 84%, 86% | 0%, stops at 19.0-19.8 °C | 0%, stops at 17.7-18.5 °C |
+
+Where it holds, stable water keeps most of these rooms within about ±0.15 °C. Where it does not, the water simply cannot deliver enough heat, and no control can change that. The real limit of each room still has to be measured.
 
 ---
 
@@ -397,16 +403,15 @@ Error in the assumed buffer temperature, over the same room types. At a real 34 
 | 2 Integration | Home Assistant layer with `observe`, `active` and `handback` modes, and daily rows logged | Built and tested against a stand-in thermostat. Calculated duty still has to be checked next to the real thermostat. |
 | 3 Pilot | One room live, see 9.1 | Criteria in 9.1 met |
 | 4 Learning and prediction | Learning and feed-forward, first in the simulator, then on the pilot room | Smaller RMS deviation than PID alone |
-| 5 All rooms | All zones, phase staggering, manifold recommendations, shared buffer in the simulator | One stable week |
-| 6 Buffer | L3 advisory, then writing the heat pump setpoint | Lower mean buffer temperature at equal comfort |
+| 5 All rooms | All zones, phase staggering, manifold recommendations | One stable week |
 | Later, optional | Shading, online EKF, MPC | Justified by data |
 
 ### 9.1 Pilot
 
 A real test on one closed basement room, chosen for its small outside influence, at a target of 21 °C. The steps are in the [pilot test guide](pilot-test.md).
 
-- Only PID and cycles run. There is no prediction, learning or buffer control yet, but daily rows are logged from the first day.
-- The heat pump stays in one mode during comparisons: on its own curve, or at a constant fixed temperature of at most 38 °C. Changing it would also affect all other rooms, which remain on their own thermostats. On the curve, the 38 °C limit depends on the curve's settings.
+- Only PID and cycles run. There is no prediction or learning yet, but daily rows are logged from the first day.
+- The mixing valves stay at a constant temperature during comparisons, with the same value in the global setting. Other rooms remain on their own thermostats.
 - Sequence: a plain thermostat baseline at 21 °C, then `observe` mode, then `active` mode. The first days after a cold room starts warming are not used for comparison. Cold start can be tested later by switching the room off for a few days.
 - Measured: time within ±0.3 °C, RMS deviation, longest closed period, setpoint writes per day, watchdog events, and whether the relay follows commands.
 - Also to learn from it: real actuator travel, command latency, and how the thermostat switches around its setpoint.
@@ -416,14 +421,13 @@ A real test on one closed basement room, chosen for its small outside influence,
 
 ## 10. Success criteria
 
-All based on what can be measured: air temperature, valve state and heat pump data.
+All based on what can be measured: air temperature and valve state.
 
 - Deviation from target within ±0.3 °C for at least 90% of the time. **[TODO]** confirm.
 - No overheating beyond +0.7 °C on sunny days, to be reassessed on real data since it may need shading in strongly sunlit rooms.
 - No valve cycle shorter than the minimum time.
 - No setpoint stuck for more than 10 minutes.
-- Lower mean buffer temperature and lower energy use at equal comfort, compared with a baseline at similar outdoor temperature.
-- Compressor starts no higher than the baseline.
+- Energy use no higher at equal comfort, compared with a baseline at similar outdoor temperature.
 - "The floor is never cold" is checked indirectly, through the longest continuous closed period of each loop. Floor temperature is not measured.
 
 ---
@@ -434,14 +438,12 @@ All based on what can be measured: air temperature, valve state and heat pump da
 |---|---|
 | Thermostat loses a command | Setpoint-only control, watchdog, alerts |
 | Setpoint writes wear out device flash | Long cycles, write logging. Wear is unknown. |
-| Heat pump stays at a low setpoint during an outage | Alert from outside Home Assistant, manual return to `auto` |
-| Floor overheating with no sensor | 38 °C buffer limit |
-| The buffer limit is too low in hard frost | Rooms run fully open, an alert is raised |
-| The set temperature differs from the real buffer temperature | Accepted for simplicity. The integral compensates a steady difference. |
-| On the heat pump's own curve, the real buffer temperature moves away from the configured typical value | See 8.6 for the tolerance. Use a fixed temperature if a room reacts badly. |
+| Floor overheating with no sensor | The temperature set on the mixing valves limits it |
+| The water is too cold for a room in cold weather | The room stays fully open and below target. Raise the temperature by hand, on the valves and in the setting. See 8.7. |
+| The global setting differs from the real water temperature, or the buffer falls below the mixing setpoint | The integral compensates a steady difference. See 8.6 for the tolerance. |
 | Learning degrades a room | Bounds, trust threshold, fallback to PID, per-room switch |
 | Integration bug affects Home Assistant, since it runs in-process | Async only, no blocking work, core tested separately |
-| Short cycling of the compressor at low load | Phase staggering, longer open times, measured starts. Partly limited by hardware. |
+| Short cycling of the compressor at low load | Phase staggering, longer open times. Partly limited by hardware. |
 | All loops closed with the manifold pump running | Stage 0 check, phase staggering |
 | Windows or ventilation | Window sensors or detection, integration pause |
 | Simulation does not reflect the house | Observation mode, reference room, gradual rollout |
@@ -451,14 +453,13 @@ All based on what can be measured: air temperature, valve state and heat pump da
 ## 12. Open questions [TODO]
 
 1. Other rooms: name, `climate` entity, target temperature.
-2. Heat pump minimum modulation power.
-3. Manifold pump behaviour with all loops closed.
-4. Actuator type and travel time.
-5. Handling of manual changes on the wall thermostat.
-6. Window sensors, if any.
-7. Target comfort tolerance.
-8. Dashboard requirements.
-9. Repository license.
+2. Manifold pump behaviour with all loops closed.
+3. Actuator type and travel time.
+4. Handling of manual changes on the wall thermostat.
+5. Window sensors, if any.
+6. Target comfort tolerance.
+7. Dashboard requirements.
+8. Repository license.
 
 ---
 
@@ -471,8 +472,7 @@ All based on what can be measured: air temperature, valve state and heat pump da
 | Control through thermostat setpoints in a ±2 °C band | Safe when the software is not running |
 | No floor temperature anywhere in the control path | No sensors exist, and simulation shows it is not needed |
 | Learning through small per-room layers rather than a neural network | Limited data, explainability, safety |
-| Buffer computed from model and forecast, aiming at 100% open | Owner principle, simulation |
-| Set heat pump temperature treated as the real buffer temperature, 38 °C limit | Owner decision, for simplicity |
+| No reading or control of the buffer or heat pump, and one global water temperature | Owner decision: each floor has a mixing valve fixed at 30 °C |
 | First real test on one closed basement room at 21 °C, PID and cycles only | Least outside influence, smallest risk |
 | English only in the repository; work goes straight to the default branch | Owner decision |
 

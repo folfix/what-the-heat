@@ -15,8 +15,10 @@ from homeassistant.components.sensor import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import PERCENTAGE, EntityCategory, UnitOfTemperature, UnitOfTime
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
+from .const import DOMAIN
 from .coordinator import ZoneCoordinator, ZoneData
 from .core.zone import ZoneStatus
 from .entity import ZoneEntity
@@ -97,12 +99,12 @@ SENSORS = (
         value=lambda data: data.step.decision.integral,
     ),
     ZoneSensorDescription(
-        key="assumed_buffer_temperature",
+        key="water_temperature",
         device_class=SensorDeviceClass.TEMPERATURE,
         entity_category=EntityCategory.DIAGNOSTIC,
         native_unit_of_measurement=UnitOfTemperature.CELSIUS,
         state_class=SensorStateClass.MEASUREMENT,
-        value=lambda data: data.buffer,
+        value=lambda data: data.water,
     ),
     ZoneSensorDescription(
         key="setpoint_writes",
@@ -124,7 +126,11 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Add the sensors of a room."""
+    """Add the sensors of a room, and remove one that older versions had."""
+    registry = er.async_get(hass)
+    old = registry.async_get_entity_id("sensor", DOMAIN, f"{entry.entry_id}_assumed_buffer_temperature")
+    if old is not None:
+        registry.async_remove(old)
     async_add_entities(ZoneSensor(entry.runtime_data, description) for description in SENSORS)
 
 

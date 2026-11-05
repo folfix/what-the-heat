@@ -120,10 +120,6 @@ class ActiveModeTest(unittest.TestCase):
         step = runner().step(0.0, reading(temperature=20.0, setpoint=15.0, max_temp=22.0, setpoint_step=0.5))
         self.assertEqual(step.commands, (Command(CommandKind.SET_TEMPERATURE, 21.5),))
 
-    def test_buffer_over_the_limit_is_reported(self) -> None:
-        self.assertIn(Problem.BUFFER_OVER_LIMIT, runner().step(0.0, reading(), buffer_temperature=39.0).problems)
-        self.assertNotIn(Problem.BUFFER_OVER_LIMIT, runner().step(0.0, reading(), buffer_temperature=38.0).problems)
-
     def test_missing_readings_hand_back_the_target(self) -> None:
         zone = runner()
         zone.step(0.0, reading(temperature=20.0, setpoint=23.0, hvac_action="heating"))

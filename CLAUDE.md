@@ -18,10 +18,10 @@ A Home Assistant custom integration for water-based underfloor heating. Requirem
 ## Design constraints
 
 - There are no floor sensors and there will be none. Floor temperature must never be a required input.
-- The temperature set on the heat pump is treated as the real buffer temperature, and it must not exceed 38 °C.
+- The integration neither reads nor changes the buffer, the mixing valves or the heat pump. The water temperature is one global setting.
 - `custom_components/what_the_heat/__init__.py` must stay free of top-level Home Assistant imports, since importing the core runs it.
 - The control core has no Home Assistant imports and no third-party dependencies, so that it runs in the simulator and in unit tests. Decisions belong in the core, and the Home Assistant layer stays thin.
 - A new room starts in observe mode, and observe mode never writes to a device.
 - Thermostats are controlled through setpoints only. Do not rely on `hvac_mode: off`.
-- Nothing critical may depend on SmartThings or AccuWeather, since both are cloud services.
+- Nothing critical may depend on AccuWeather, since it is a cloud service.
 - Simulation results compare options. Do not present them as predictions for the real house.

@@ -25,11 +25,11 @@ DAY_S = 86400.0
 
 @dataclass(frozen=True)
 class Environment:
-    """Conditions around the room. The real buffer moves around the setpoint the controller assumes."""
+    """Conditions around the room. The real water moves around the setpoint the controller assumes."""
 
-    buffer_setpoint: float = 34.0
-    buffer_ripple: float = 1.5
-    buffer_ripple_period_s: float = 3 * 3600.0
+    water_setpoint: float = 34.0
+    water_ripple: float = 1.5
+    water_ripple_period_s: float = 3 * 3600.0
     hot_water_sag: float = 3.0
     hot_water_starts_h: tuple[float, ...] = (6.0, 15.0)
     hot_water_half_duration_h: float = 0.75
@@ -41,9 +41,9 @@ class Environment:
         hour = (now_s / 3600.0) % 24.0
         return self.outdoor_mean + self.outdoor_swing * math.sin(2.0 * math.pi * (hour - 9.0) / 24.0)
 
-    def buffer(self, now_s: float) -> float:
-        phase = (now_s / self.buffer_ripple_period_s) % 1.0
-        value = self.buffer_setpoint + self.buffer_ripple * (2.0 * phase - 1.0)
+    def water(self, now_s: float) -> float:
+        phase = (now_s / self.water_ripple_period_s) % 1.0
+        value = self.water_setpoint + self.water_ripple * (2.0 * phase - 1.0)
         hour = (now_s / 3600.0) % 24.0
         half = self.hot_water_half_duration_h
         for start in self.hot_water_starts_h:
@@ -103,13 +103,13 @@ def simulate(
     initial_integral: float = 30.0,
     band: float = 0.3,
     observe_days: float = 0.0,
-    assumed_buffer: float | None = None,
+    assumed_water: float | None = None,
 ) -> Result:
     """Run the room and return what happened after the settling period.
 
     With observe_days the room first runs on the plain thermostat, with the runner in
     observe mode, and the runner then takes over. In that case settle_days counts from
-    the takeover. With assumed_buffer the controller believes in a buffer temperature
+    the takeover. With assumed_water the controller believes in a water temperature
     other than the real setpoint.
     """
     faults = faults or Faults()
@@ -163,7 +163,7 @@ def simulate(
                     hvac_action="heating" if thermostat.heating else "idle",
                     hvac_modes=("off", "heat"),
                 ),
-                environment.buffer_setpoint if assumed_buffer is None else assumed_buffer,
+                environment.water_setpoint if assumed_water is None else assumed_water,
             )
             result.statuses.add(step.decision.status)
             result.resends = step.resends
@@ -178,7 +178,7 @@ def simulate(
                 result.wrong_setpoint_s += STEP_S
         relay = thermostat.step(air)
         flow = actuator.step(STEP_S, relay)
-        room.step(STEP_S, flow, environment.buffer(now_s), environment.outdoor(now_s), environment.ground)
+        room.step(STEP_S, flow, environment.water(now_s), environment.outdoor(now_s), environment.ground)
         if result.reached_target_s is None and room.air >= target - band:
             result.reached_target_s = now_s
         if now_s < settle_s:

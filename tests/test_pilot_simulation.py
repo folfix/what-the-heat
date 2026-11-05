@@ -12,15 +12,15 @@ MINIMUM_RUN_S = 12 * 60.0 - 60.0  # one simulation step of tolerance
 class PilotRoomTest(unittest.TestCase):
     def test_controller_holds_the_target_in_reachable_conditions(self) -> None:
         for label, (parameters, ground) in ROOMS.items():
-            for buffer in (34.0, 38.0):
-                with self.subTest(room=label, buffer=buffer):
-                    result = simulate(parameters, Environment(buffer_setpoint=buffer, ground=ground), TARGET)
+            for water in (34.0, 38.0):
+                with self.subTest(room=label, water=water):
+                    result = simulate(parameters, Environment(water_setpoint=water, ground=ground), TARGET)
                     self.assertGreaterEqual(result.within_band_pct, 90.0)
 
     def test_controller_beats_the_thermostat(self) -> None:
         for label, (parameters, ground) in ROOMS.items():
             with self.subTest(room=label):
-                environment = Environment(buffer_setpoint=34.0, ground=ground)
+                environment = Environment(water_setpoint=34.0, ground=ground)
                 controlled = simulate(parameters, environment, TARGET)
                 plain = simulate(parameters, environment, TARGET, use_controller=False)
                 self.assertLess(controlled.rms, plain.rms)
@@ -28,24 +28,24 @@ class PilotRoomTest(unittest.TestCase):
 
     def test_valve_cycles_respect_the_minimum_times(self) -> None:
         for label, (parameters, ground) in ROOMS.items():
-            for buffer in (34.0, 38.0):
-                with self.subTest(room=label, buffer=buffer):
-                    result = simulate(parameters, Environment(buffer_setpoint=buffer, ground=ground), TARGET)
+            for water in (34.0, 38.0):
+                with self.subTest(room=label, water=water):
+                    result = simulate(parameters, Environment(water_setpoint=water, ground=ground), TARGET)
                     self.assertGreaterEqual(result.shortest_open_s, MINIMUM_RUN_S)
                     self.assertGreaterEqual(result.shortest_closed_s, MINIMUM_RUN_S)
 
     def test_start_from_the_current_temperature_does_not_overshoot_much(self) -> None:
         parameters, ground = ROOMS["reference"]
-        result = simulate(parameters, Environment(buffer_setpoint=38.0, ground=ground), TARGET)
+        result = simulate(parameters, Environment(water_setpoint=38.0, ground=ground), TARGET)
         self.assertLess(result.first_days_high, TARGET + 0.5)
 
     def test_cold_start_after_days_without_heating(self) -> None:
         # Floor at air temperature and colder walls, no learned integral yet.
         for label, (parameters, ground) in ROOMS.items():
-            for buffer in (34.0, 38.0):
+            for water in (34.0, 38.0):
                 for air in (19.0, 16.0, 13.0):
-                    with self.subTest(room=label, buffer=buffer, air=air):
-                        environment = Environment(buffer_setpoint=buffer, ground=ground)
+                    with self.subTest(room=label, water=water, air=air):
+                        environment = Environment(water_setpoint=water, ground=ground)
                         start = {"initial_air": air, "initial_floor": air, "initial_wall": air - 1.0}
                         controlled = simulate(parameters, environment, TARGET, initial_integral=0.0, **start)
                         self.assertIsNotNone(controlled.reached_target_s)
@@ -54,7 +54,7 @@ class PilotRoomTest(unittest.TestCase):
 
     def test_cold_start_is_about_as_fast_as_the_thermostat(self) -> None:
         parameters, ground = ROOMS["reference"]
-        environment = Environment(buffer_setpoint=34.0, ground=ground)
+        environment = Environment(water_setpoint=34.0, ground=ground)
         start = {"initial_air": 16.0, "initial_floor": 16.0, "initial_wall": 15.0}
         controlled = simulate(parameters, environment, TARGET, initial_integral=0.0, **start)
         plain = simulate(parameters, environment, TARGET, use_controller=False, **start)
@@ -64,22 +64,22 @@ class PilotRoomTest(unittest.TestCase):
         # The runner first watches the thermostat for 3 days, then takes over.
         for label, (parameters, ground) in ROOMS.items():
             with self.subTest(room=label):
-                environment = Environment(buffer_setpoint=34.0, ground=ground)
+                environment = Environment(water_setpoint=34.0, ground=ground)
                 result = simulate(parameters, environment, TARGET, initial_air=TARGET, observe_days=3.0)
                 self.assertGreaterEqual(result.within_band_pct, 90.0)
                 self.assertLess(result.first_days_high, TARGET + 0.6)
 
-    def test_small_error_in_the_assumed_buffer_is_tolerated(self) -> None:
+    def test_small_error_in_the_assumed_water_is_tolerated(self) -> None:
         for label, (parameters, ground) in ROOMS.items():
             for error in (-2.0, 2.0):
                 with self.subTest(room=label, error=error):
-                    environment = Environment(buffer_setpoint=34.0, ground=ground)
-                    result = simulate(parameters, environment, TARGET, assumed_buffer=34.0 + error, days=21.0, settle_days=7.0)
+                    environment = Environment(water_setpoint=34.0, ground=ground)
+                    result = simulate(parameters, environment, TARGET, assumed_water=34.0 + error, days=21.0, settle_days=7.0)
                     self.assertGreaterEqual(result.within_band_pct, 90.0)
 
     def test_unreachable_target_saturates_without_alarm_from_the_watchdog(self) -> None:
         parameters, ground = ROOMS["high losses"]
-        result = simulate(parameters, Environment(buffer_setpoint=30.0, ground=ground), TARGET)
+        result = simulate(parameters, Environment(water_setpoint=30.0, ground=ground), TARGET)
         self.assertGreater(result.mean_duty, 95.0)
         self.assertEqual(result.alerts, 0)
 
@@ -87,7 +87,7 @@ class PilotRoomTest(unittest.TestCase):
 class PilotFaultTest(unittest.TestCase):
     def setUp(self) -> None:
         self.parameters, ground = ROOMS["reference"]
-        self.environment = Environment(buffer_setpoint=34.0, ground=ground)
+        self.environment = Environment(water_setpoint=34.0, ground=ground)
 
     def test_lost_commands_are_recovered(self) -> None:
         result = simulate(self.parameters, self.environment, TARGET, faults=Faults(lost_write_probability=0.2))

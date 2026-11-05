@@ -53,8 +53,8 @@ class ZoneDecision:
 class ZoneController:
     """Runs smoothing, PI control and cycle scheduling for one room.
 
-    The buffer temperature, normally the heat pump setpoint, scales the output so that
-    the same power demand gives a shorter open time when the water is hotter. Without it
+    The temperature of the water going into the floor scales the output, so that the
+    same power demand gives a shorter open time when the water is hotter. Without it
     the output is used directly as duty. When readings stop, the last duty is held, and
     later the plain target goes back to the thermostat, which then regulates on its own.
     """
@@ -112,19 +112,19 @@ class ZoneController:
         """Return the state worth keeping across a restart."""
         return {"integral": self._pid.integral, "carry_s": self._cycle.carry_s}
 
-    def gain_scale(self, temperature: float, buffer_temperature: float | None) -> float:
+    def gain_scale(self, temperature: float, water_temperature: float | None) -> float:
         """Return the factor that converts required power into valve duty."""
         config = self._config
-        if buffer_temperature is None:
+        if water_temperature is None:
             return 1.0
-        delta = buffer_temperature - temperature - config.floor_offset
+        delta = water_temperature - temperature - config.floor_offset
         return config.reference_water_delta / max(config.min_water_delta, delta)
 
     def step(
         self,
         now_s: float,
         room_temperature: float | None,
-        buffer_temperature: float | None = None,
+        water_temperature: float | None = None,
         feedforward: float = 0.0,
     ) -> ZoneDecision:
         """Advance the controller and return its decision."""
@@ -143,7 +143,7 @@ class ZoneController:
             error,
             min(dt_s, config.max_integration_step_s) if in_control else 0.0,
             feedforward,
-            self.gain_scale(temperature, buffer_temperature),
+            self.gain_scale(temperature, water_temperature),
         )
         self._duty = output.duty
         return self._drive(now_s, ZoneStatus.NORMAL)

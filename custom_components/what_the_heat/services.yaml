@@ -1,0 +1,11 @@
+set_water_temperature:
+  fields:
+    temperature:
+      required: true
+      example: 30
+      selector:
+        number:
+          min: 20
+          max: 38
+          step: 0.5
+          unit_of_measurement: "°C"

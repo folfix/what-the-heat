@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, fields
 
 BAND = 0.3
 MAX_ROWS = 400
@@ -27,8 +27,8 @@ class _Day:
     active_s: float = 0.0
     outdoor_s: float = 0.0
     outdoor_sum: float = 0.0
-    buffer_s: float = 0.0
-    buffer_sum: float = 0.0
+    water_s: float = 0.0
+    water_sum: float = 0.0
     writes: int = 0
 
     def row(self) -> dict[str, float | int | str | None]:
@@ -51,7 +51,7 @@ class _Day:
             "longest_closed_h": round(self.longest_closed_s / 3600.0, 2),
             "active_pct": share(self.active_s, self.seconds),
             "outdoor_mean": mean(self.outdoor_sum, self.outdoor_s),
-            "buffer_mean": mean(self.buffer_sum, self.buffer_s),
+            "water_mean": mean(self.water_sum, self.water_s),
             "writes": self.writes,
         }
 
@@ -61,7 +61,9 @@ class DailyLog:
 
     def __init__(self, rows: list[dict] | None = None, current: dict | None = None) -> None:
         self._rows: list[dict] = list(rows or [])
-        self._day = _Day(**current) if current else None
+        # Saved state may come from a version with other fields.
+        known = {item.name for item in fields(_Day)}
+        self._day = _Day(**{key: value for key, value in current.items() if key in known}) if current else None
 
     @property
     def rows(self) -> list[dict]:
@@ -86,7 +88,7 @@ class DailyLog:
         is_heating: bool | None = None,
         is_active: bool = False,
         outdoor: float | None = None,
-        buffer: float | None = None,
+        water: float | None = None,
         writes: int = 0,
     ) -> None:
         """Add one interval to the given date."""
@@ -121,6 +123,6 @@ class DailyLog:
         if outdoor is not None:
             day.outdoor_s += dt_s
             day.outdoor_sum += outdoor * dt_s
-        if buffer is not None:
-            day.buffer_s += dt_s
-            day.buffer_sum += buffer * dt_s
+        if water is not None:
+            day.water_s += dt_s
+            day.water_sum += water * dt_s

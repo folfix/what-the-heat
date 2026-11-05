@@ -28,19 +28,20 @@
 <script>
   const KEYS = {
     zone: "climate", mode: "select", duty: "sensor", time_in_band_today: "sensor", rms_deviation_today: "sensor",
-    heating_today: "sensor", longest_closed_today: "sensor", assumed_buffer_temperature: "sensor",
+    heating_today: "sensor", longest_closed_today: "sensor", water_temperature: "sensor",
     setpoint_writes: "sensor", resends: "sensor", valve_requested: "binary_sensor", problem: "binary_sensor",
   };
   const ROOMS = [
-    { id: "kitchen", name: "Old Kitchen", area: "Basement", mode: "observe", temp: 18.9, target: 21, action: "idle", duty: 100, band: 0, rms: 2.1, heating: 0, off: 0.02, buffer: 34, writes: 0, resends: 0, valve: "on", reasons: [] },
-    { id: "office", name: "Office", area: "Basement", mode: "active", temp: 21.1, target: 21, action: "heating", duty: 37, band: 98.4, rms: 0.08, heating: 36.5, off: 1.1, buffer: 34, writes: 31, resends: 0, valve: "on", reasons: [] },
-    { id: "bedroom", name: "A bedroom with a really quite long name that has to wrap", area: "", mode: "active", temp: 20.2, target: 21, action: "idle", duty: 64, band: 41, rms: 0.61, heating: 12, off: 5.4, buffer: 38, writes: 47, resends: 6, valve: "off", reasons: ["thermostat_not_following", "buffer_over_limit"] },
-    { id: "hall", name: "Hall", area: "Ground floor", mode: "handback", temp: null, target: 20.5, action: null, duty: null, band: null, rms: null, heating: null, off: null, buffer: 34, writes: 2, resends: 0, valve: "off", reasons: [] },
+    { id: "kitchen", name: "Old Kitchen", area: "Basement", mode: "observe", temp: 18.9, target: 21, action: "idle", duty: 100, band: 0, rms: 2.1, heating: 0, off: 0.02, writes: 0, resends: 0, valve: "on", reasons: [] },
+    { id: "office", name: "Office", area: "Basement", mode: "active", temp: 21.1, target: 21, action: "heating", duty: 37, band: 98.4, rms: 0.08, heating: 36.5, off: 1.1, writes: 31, resends: 0, valve: "on", reasons: [] },
+    { id: "bedroom", name: "A bedroom with a really quite long name that has to wrap", area: "", mode: "active", temp: 20.2, target: 21, action: "idle", duty: 64, band: 41, rms: 0.61, heating: 12, off: 5.4, writes: 47, resends: 6, valve: "off", reasons: ["thermostat_not_following", "readings_missing"] },
+    { id: "hall", name: "Hall", area: "Ground floor", mode: "handback", temp: null, target: 20.5, action: null, duty: null, band: null, rms: null, heating: null, off: null, writes: 2, resends: 0, valve: "off", reasons: [] },
   ];
+  let water = 30;
   const stateOf = (room, key) => {
     const updated = String(Date.now());
     const base = { last_updated: updated, attributes: {} };
-    const value = { duty: room.duty, time_in_band_today: room.band, rms_deviation_today: room.rms, heating_today: room.heating, longest_closed_today: room.off, assumed_buffer_temperature: room.buffer, setpoint_writes: room.writes, resends: room.resends, mode: room.mode, valve_requested: room.valve }[key];
+    const value = { duty: room.duty, time_in_band_today: room.band, rms_deviation_today: room.rms, heating_today: room.heating, longest_closed_today: room.off, water_temperature: water, setpoint_writes: room.writes, resends: room.resends, mode: room.mode, valve_requested: room.valve }[key];
     if (key === "zone") return { ...base, state: "heat", attributes: { current_temperature: room.temp, temperature: room.target, hvac_action: room.action, min_temp: 5, max_temp: 30 } };
     if (key === "problem") return { ...base, state: room.reasons.length ? "on" : "off", attributes: { reasons: room.reasons } };
     return { ...base, state: value === null ? "unknown" : String(value) };
@@ -59,6 +60,11 @@
       }
     }
     hass.callService = (domain, service, data) => {
+      if (service === "set_water_temperature") {
+        water = data.temperature;
+        panel.hass = build();
+        return;
+      }
       const room = rooms.find((item) => data.entity_id.includes(`.${item.id}_`));
       if (service === "set_temperature") room.target = data.temperature;
       if (service === "select_option") room.mode = data.option;

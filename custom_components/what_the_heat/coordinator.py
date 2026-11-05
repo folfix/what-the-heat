@@ -29,17 +29,14 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
 
 from .const import (
-    BUFFER_LIMIT,
-    CONF_BUFFER_ENTITY,
-    CONF_BUFFER_FALLBACK,
     CONF_OUTDOOR_ENTITY,
     CONF_PHASE_OFFSET,
     CONF_TARGET,
     CONF_THERMOSTAT,
-    DEFAULT_BUFFER_FALLBACK,
     DEFAULT_PHASE_OFFSET,
     DEFAULT_TARGET,
     DOMAIN,
+    LEGACY_SETTINGS,
     MAX_LOG_STEP_S,
     SAVE_INTERVAL_S,
     STORAGE_VERSION,
@@ -48,6 +45,7 @@ from .const import (
 from .core.daily import DailyLog
 from .core.runner import Command, CommandKind, Mode, Problem, RunnerConfig, RunnerStep, ThermostatReading, ZoneRunner
 from .core.zone import ZoneConfig
+from .settings import GlobalSettings
 
 if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
@@ -58,7 +56,6 @@ PROBLEM_TEXT = {
     Problem.THERMOSTAT_NOT_FOLLOWING: "The thermostat is not following commands.",
     Problem.THERMOSTAT_CANNOT_HEAT: "The thermostat cannot heat. Check its summer mode.",
     Problem.READINGS_MISSING: "Room temperature readings are missing.",
-    Problem.BUFFER_OVER_LIMIT: f"The buffer temperature is above the {BUFFER_LIMIT:g} °C limit.",
 }
 
 
@@ -68,7 +65,7 @@ class ZoneData:
 
     step: RunnerStep
     reading: ThermostatReading
-    buffer: float | None
+    water: float
     outdoor: float | None
     today: dict[str, Any] | None
 
@@ -76,14 +73,15 @@ class ZoneData:
 def merged_config(entry: ConfigEntry) -> dict[str, Any]:
     """Return the entry's settings, with options replacing the initial values.
 
-    Optional entities removed in the options must stay removed, so they are not taken
-    from the initial data once options exist.
+    An optional entity removed in the options must stay removed, so it is not taken from
+    the initial data once options exist. Settings from older versions are left out.
     """
     config = dict(entry.data)
     if entry.options:
-        config.pop(CONF_BUFFER_ENTITY, None)
         config.pop(CONF_OUTDOOR_ENTITY, None)
         config.update(entry.options)
+    for key in LEGACY_SETTINGS:
+        config.pop(key, None)
     return config
 
 
@@ -119,7 +117,7 @@ def read_thermostat(state: State | None) -> ThermostatReading:
 class ZoneCoordinator(DataUpdateCoordinator[ZoneData]):
     """Runs one room every minute. Failures are logged and retried, never raised."""
 
-    def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry, settings: GlobalSettings) -> None:
         super().__init__(
             hass,
             LOGGER,
@@ -127,12 +125,12 @@ class ZoneCoordinator(DataUpdateCoordinator[ZoneData]):
             name=entry.title,
             update_interval=timedelta(seconds=UPDATE_INTERVAL_S),
         )
-        self._settings = merged_config(entry)
+        self._config = merged_config(entry)
+        self._global = settings
         self._store: Store[dict[str, Any]] = Store(hass, STORAGE_VERSION, f"{DOMAIN}.{entry.entry_id}")
-        self._thermostat: str = self._settings[CONF_THERMOSTAT]
+        self._thermostat: str = self._config[CONF_THERMOSTAT]
         self.runner: ZoneRunner
         self.log: DailyLog
-        self._last_buffer: float | None = None
         self._last_step_s: float | None = None
         self._last_save_s = dt_util.utcnow().timestamp()
         self._notified: frozenset[Problem] = frozenset()
@@ -142,10 +140,10 @@ class ZoneCoordinator(DataUpdateCoordinator[ZoneData]):
         stored = await self._store.async_load() or {}
         state = stored.get("runner", {})
         now_s = dt_util.utcnow().timestamp()
-        target = state.get("target", self._settings.get(CONF_TARGET, DEFAULT_TARGET))
-        phase_minutes = self._settings.get(CONF_PHASE_OFFSET, DEFAULT_PHASE_OFFSET)
+        target = state.get("target", self._config.get(CONF_TARGET, DEFAULT_TARGET))
+        phase_minutes = self._config.get(CONF_PHASE_OFFSET, DEFAULT_PHASE_OFFSET)
         self.runner = ZoneRunner(
-            RunnerConfig(zone=ZoneConfig(target=target, phase_offset_s=phase_minutes * 60.0), buffer_limit=BUFFER_LIMIT),
+            RunnerConfig(zone=ZoneConfig(target=target, phase_offset_s=phase_minutes * 60.0)),
             Mode(state.get("mode", Mode.OBSERVE.value)),
             integral=state.get("integral", 0.0),
             carry_s=state.get("carry_s", 0.0),
@@ -155,21 +153,20 @@ class ZoneCoordinator(DataUpdateCoordinator[ZoneData]):
             writes=state.get("writes", 0),
         )
         self.log = DailyLog(**stored.get("log", {}))
-        self._last_buffer = stored.get("last_buffer")
 
     def snapshot(self) -> dict[str, Any]:
         """Return everything worth keeping across a restart."""
-        return {"runner": self.runner.snapshot(), "log": self.log.snapshot(), "last_buffer": self._last_buffer}
+        return {"runner": self.runner.snapshot(), "log": self.log.snapshot()}
 
     async def _async_update_data(self) -> ZoneData:
         now_s = dt_util.utcnow().timestamp()
         reading = read_thermostat(self.hass.states.get(self._thermostat))
-        buffer = self._read_buffer()
+        water = self._global.water_temperature
         outdoor = self._read_outdoor()
-        step = self.runner.step(now_s, reading, buffer)
+        step = self.runner.step(now_s, reading, water)
         decision = step.decision
         LOGGER.debug(
-            "%s: mode=%s status=%s room=%s filtered=%s setpoint=%s hvac=%s/%s buffer=%s "
+            "%s: mode=%s status=%s room=%s filtered=%s setpoint=%s hvac=%s/%s water=%s "
             "duty=%.1f integral=%.1f valve_open=%s requested=%s commands=%d",
             self._thermostat,
             step.mode.value,
@@ -179,7 +176,7 @@ class ZoneCoordinator(DataUpdateCoordinator[ZoneData]):
             reading.setpoint,
             reading.hvac_mode,
             reading.hvac_action,
-            buffer,
+            water,
             decision.duty,
             decision.integral,
             decision.valve_open,
@@ -198,7 +195,7 @@ class ZoneCoordinator(DataUpdateCoordinator[ZoneData]):
             is_heating=reading.is_heating,
             is_active=step.mode is Mode.ACTIVE,
             outdoor=outdoor,
-            buffer=buffer,
+            water=water,
             writes=step.new_writes,
         )
         self._update_notification(step.problems)
@@ -206,27 +203,10 @@ class ZoneCoordinator(DataUpdateCoordinator[ZoneData]):
         if now_s - self._last_save_s >= SAVE_INTERVAL_S:
             self._last_save_s = now_s
             self._store.async_delay_save(self.snapshot, 1)
-        return ZoneData(step, reading, buffer, outdoor, self.log.today)
-
-    def _read_buffer(self) -> float:
-        """Return the assumed buffer temperature.
-
-        During an outage the set temperature has most likely not changed, so the last one
-        stays in use. A heat pump on its own weather curve exposes no set temperature, and
-        the last one would soon be wrong, so the configured typical value applies instead.
-        """
-        fallback = self._settings.get(CONF_BUFFER_FALLBACK, DEFAULT_BUFFER_FALLBACK)
-        entity = self._settings.get(CONF_BUFFER_ENTITY)
-        if not entity:
-            return fallback
-        state = self.hass.states.get(entity)
-        if _is_available(state):
-            raw = state.attributes.get(ATTR_TEMPERATURE) if state.domain == CLIMATE_DOMAIN else state.state
-            self._last_buffer = _number(raw)
-        return fallback if self._last_buffer is None else self._last_buffer
+        return ZoneData(step, reading, water, outdoor, self.log.today)
 
     def _read_outdoor(self) -> float | None:
-        entity = self._settings.get(CONF_OUTDOOR_ENTITY)
+        entity = self._config.get(CONF_OUTDOOR_ENTITY)
         if not entity:
             return None
         state = self.hass.states.get(entity)

@@ -23,10 +23,10 @@ class ZoneControllerTest(unittest.TestCase):
         self.assertFalse(decision.valve_open)
         self.assertEqual(decision.setpoint, 18.0)
 
-    def test_hotter_buffer_gives_less_duty(self) -> None:
+    def test_hotter_water_gives_less_duty(self) -> None:
         config = ZoneConfig(target=20.0, pid=PidConfig(kp=50.0, ki=0.0))
-        cool = ZoneController(config).step(0.0, 19.8, buffer_temperature=30.0)
-        hot = ZoneController(config).step(0.0, 19.8, buffer_temperature=38.0)
+        cool = ZoneController(config).step(0.0, 19.8, water_temperature=30.0)
+        hot = ZoneController(config).step(0.0, 19.8, water_temperature=38.0)
         self.assertGreater(cool.duty, hot.duty)
 
     def test_smoothing_ignores_a_short_spike(self) -> None:

@@ -4,11 +4,11 @@ How to run the first real test on one closed room. Background and criteria are i
 
 ## What runs in this test
 
-Only PID and cycles. There is no prediction, no learning and no buffer control. The integration never writes to the heat pump. It reads the heat pump setpoint and writes only to the room's thermostat, and only in `Active` mode.
+Only PID and cycles, with no prediction and no learning. The integration writes only to the room's thermostat, and only in `Active` mode. It neither reads nor changes the mixing valves, the buffer or the heat pump.
 
 ## 1. Install
 
-With HACS: **HACS → ⋮ → Custom repositories**, add `https://github.com/folfix/what-the-heat` with the type **Integration**, then download **What the Heat**.
+With the Marketplace (HACS before Home Assistant 2026.11): add `https://github.com/folfix/what-the-heat` as a custom repository of the type **Integration**, then download **What the Heat**.
 
 Without HACS: copy `custom_components/what_the_heat` to `/config/custom_components/what_the_heat`.
 
@@ -23,25 +23,23 @@ Restart Home Assistant in both cases.
 | Room name | Any name. It becomes part of the entity names. |
 | Thermostat | The room's `climate` entity |
 | Target temperature | 21 |
-| Heat pump or buffer entity | The heat pump's `climate` entity. Its set temperature is used. |
-| Typical buffer temperature | Used while the heat pump exposes no set temperature, such as on its own weather curve. See step 4. |
 | Outdoor temperature sensor | The outdoor sensor. It is only logged for now. |
 | Delay of the first cycle | 0 |
 
 A new room starts in **Observe** mode. It writes nothing to the thermostat, so this step is safe.
 
+Then open the **What the Heat** page in the sidebar and set the water temperature to what the mixing valves are set to. It is shared by all rooms, and the default is 30 °C.
+
 ## 3. Baseline
 
 1. Close the room and keep it closed during the test.
 2. Set the thermostat itself to 21 °C. In Observe mode the integration does not do this.
-3. Leave the heat pump in one mode for both the baseline and the controlled period: on its own curve, or at a fixed temperature of at most 38 °C. On the curve, the limit depends on the curve's settings. Any change also affects all other rooms.
+3. Keep the mixing valve at the same temperature for both the baseline and the controlled period. Any change also affects the other rooms on that floor.
 4. Wait until the room has warmed up, then for several more days. The first days are not representative, since walls and soil warm slowly.
 
 The integration measures this period too, which provides the comparison.
 
 ## 4. Take over
-
-If the heat pump runs on its own curve, first set **Typical buffer temperature** in the integration's settings to the water temperature it usually runs at. Within about 2 °C of the real value the results barely change in simulation. At 4 °C most simulated rooms still hold, but some get clearly worse. At a fixed temperature, its set value is read directly.
 
 Set the mode to **Active**, either with the **Mode** entity or on the **What the Heat** page in the sidebar, where a second click confirms it. The thermostat display will now alternate between target + 2 °C and target - 2 °C, which is expected.
 

@@ -9,19 +9,15 @@
     "step": {
       "user": {
         "title": "Add a room",
-        "description": "A new room starts in observe mode: it calculates and logs, and writes nothing to the thermostat until you select active mode.",
+        "description": "A new room starts in observe mode: it calculates and logs, and writes nothing to the thermostat until you select active mode. The water temperature is shared by all rooms and is set on the What the Heat page.",
         "data": {
           "name": "Room name",
           "thermostat": "Thermostat",
           "target": "Target temperature",
-          "buffer_entity": "Heat pump or buffer entity",
-          "buffer_fallback": "Typical buffer temperature",
           "outdoor_entity": "Outdoor temperature sensor",
           "phase_offset": "Delay of the first cycle"
         },
         "data_description": {
-          "buffer_entity": "For a climate entity its set temperature is used, and for other entities their value.",
-          "buffer_fallback": "Used while the heat pump exposes no set temperature, for example on its own weather curve. Keep it within about 2 °C of the real value.",
           "outdoor_entity": "Only logged for now, for learning later.",
           "phase_offset": "Set different values for different rooms, so that they do not all open together."
         }
@@ -33,16 +29,24 @@
       "init": {
         "title": "Room settings",
         "data": {
-          "buffer_entity": "Heat pump or buffer entity",
-          "buffer_fallback": "Typical buffer temperature",
           "outdoor_entity": "Outdoor temperature sensor",
           "phase_offset": "Delay of the first cycle"
         },
         "data_description": {
-          "buffer_entity": "For a climate entity its set temperature is used, and for other entities their value.",
-          "buffer_fallback": "Used while the heat pump exposes no set temperature, for example on its own weather curve. Keep it within about 2 °C of the real value.",
           "outdoor_entity": "Only logged for now, for learning later.",
           "phase_offset": "Set different values for different rooms, so that they do not all open together."
+        }
+      }
+    }
+  },
+  "services": {
+    "set_water_temperature": {
+      "name": "Set water temperature",
+      "description": "Sets the temperature of the water going into the floors, for all rooms. It only tells the controller what the water temperature is, and changes nothing on the heat source.",
+      "fields": {
+        "temperature": {
+          "name": "Temperature",
+          "description": "The temperature set on the mixing valves."
         }
       }
     }
@@ -96,7 +100,7 @@
       "heating_today": { "name": "Heating today" },
       "longest_closed_today": { "name": "Longest closed today" },
       "integral": { "name": "Integral" },
-      "assumed_buffer_temperature": { "name": "Assumed buffer temperature" },
+      "water_temperature": { "name": "Water temperature" },
       "setpoint_writes": { "name": "Setpoint writes" },
       "resends": { "name": "Resent commands" }
     }

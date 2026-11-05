@@ -20,14 +20,10 @@ from homeassistant.helpers.selector import (
 )
 
 from .const import (
-    BUFFER_LIMIT,
-    CONF_BUFFER_ENTITY,
-    CONF_BUFFER_FALLBACK,
     CONF_OUTDOOR_ENTITY,
     CONF_PHASE_OFFSET,
     CONF_TARGET,
     CONF_THERMOSTAT,
-    DEFAULT_BUFFER_FALLBACK,
     DEFAULT_PHASE_OFFSET,
     DEFAULT_TARGET,
     DOMAIN,
@@ -37,24 +33,7 @@ from .const import (
 )
 from .coordinator import merged_config
 
-
-def _temperature(minimum: float, maximum: float, step: float) -> NumberSelector:
-    return NumberSelector(
-        NumberSelectorConfig(
-            min=minimum,
-            max=maximum,
-            step=step,
-            mode=NumberSelectorMode.BOX,
-            unit_of_measurement=UnitOfTemperature.CELSIUS,
-        )
-    )
-
-
 SETTINGS_FIELDS = {
-    vol.Optional(CONF_BUFFER_ENTITY): EntitySelector(
-        EntitySelectorConfig(domain=[CLIMATE_DOMAIN, "sensor", "number", "input_number"])
-    ),
-    vol.Required(CONF_BUFFER_FALLBACK, default=DEFAULT_BUFFER_FALLBACK): _temperature(20.0, BUFFER_LIMIT, 0.5),
     vol.Optional(CONF_OUTDOOR_ENTITY): EntitySelector(EntitySelectorConfig(domain="sensor")),
     vol.Required(CONF_PHASE_OFFSET, default=DEFAULT_PHASE_OFFSET): NumberSelector(
         NumberSelectorConfig(
@@ -70,7 +49,15 @@ USER_SCHEMA = vol.Schema(
     {
         vol.Required(CONF_NAME): TextSelector(),
         vol.Required(CONF_THERMOSTAT): EntitySelector(EntitySelectorConfig(domain=CLIMATE_DOMAIN)),
-        vol.Required(CONF_TARGET, default=DEFAULT_TARGET): _temperature(MIN_TARGET, MAX_TARGET, TARGET_STEP),
+        vol.Required(CONF_TARGET, default=DEFAULT_TARGET): NumberSelector(
+            NumberSelectorConfig(
+                min=MIN_TARGET,
+                max=MAX_TARGET,
+                step=TARGET_STEP,
+                mode=NumberSelectorMode.BOX,
+                unit_of_measurement=UnitOfTemperature.CELSIUS,
+            )
+        ),
         **SETTINGS_FIELDS,
     }
 )

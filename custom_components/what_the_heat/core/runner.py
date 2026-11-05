@@ -28,7 +28,6 @@ class Problem(Enum):
     THERMOSTAT_NOT_FOLLOWING = "thermostat_not_following"
     THERMOSTAT_CANNOT_HEAT = "thermostat_cannot_heat"
     READINGS_MISSING = "readings_missing"
-    BUFFER_OVER_LIMIT = "buffer_over_limit"
 
 
 class CommandKind(Enum):
@@ -71,7 +70,6 @@ class RunnerConfig:
 
     zone: ZoneConfig = field(default_factory=ZoneConfig)
     watchdog: WatchdogConfig = field(default_factory=WatchdogConfig)
-    buffer_limit: float = 38.0
     heat_mode_retry_s: float = 5 * 60.0
     heat_mode_attempts: int = 3
     heating_share_time_constant_s: float = 24 * 3600.0
@@ -124,7 +122,7 @@ class ZoneRunner:
         self._resends = 0
         self._last_step_s: float | None = None
         self._last_temperature: float | None = None
-        self._last_buffer: float | None = None
+        self._last_water: float | None = None
         self._next_heat_mode_s = 0.0
         self._heat_mode_tries = 0
 
@@ -173,20 +171,17 @@ class ZoneRunner:
         self,
         now_s: float,
         reading: ThermostatReading,
-        buffer_temperature: float | None = None,
+        water_temperature: float | None = None,
     ) -> RunnerStep:
         """Advance by one step and return what should be done."""
-        config = self._config
         dt_s = 0.0 if self._last_step_s is None else now_s - self._last_step_s
         self._last_step_s = now_s
         writes_before = self._writes
         self._controller.set_device_limits(reading.min_temp, reading.max_temp, reading.setpoint_step)
-        decision = self._controller.step(now_s, reading.temperature, buffer_temperature)
-        self._track_heating(reading, buffer_temperature, dt_s)
+        decision = self._controller.step(now_s, reading.temperature, water_temperature)
+        self._track_heating(reading, water_temperature, dt_s)
 
         problems: set[Problem] = set()
-        if buffer_temperature is not None and buffer_temperature > config.buffer_limit:
-            problems.add(Problem.BUFFER_OVER_LIMIT)
         if decision.status in (ZoneStatus.DEGRADED, ZoneStatus.HANDBACK):
             problems.add(Problem.READINGS_MISSING)
         commands: list[Command] = []
@@ -202,15 +197,15 @@ class ZoneRunner:
             self._writes - writes_before,
         )
 
-    def _track_heating(self, reading: ThermostatReading, buffer_temperature: float | None, dt_s: float) -> None:
+    def _track_heating(self, reading: ThermostatReading, water_temperature: float | None, dt_s: float) -> None:
         is_heating = reading.is_heating
         if is_heating is not None:
             self._heating_share.update(1.0 if is_heating else 0.0, dt_s)
             self._observed_s += dt_s
         if reading.temperature is not None:
             self._last_temperature = reading.temperature
-        if buffer_temperature is not None:
-            self._last_buffer = buffer_temperature
+        if water_temperature is not None:
+            self._last_water = water_temperature
 
     def _seed_integral(self) -> float:
         config = self._config
@@ -220,7 +215,7 @@ class ZoneRunner:
             return 0.0
         if abs(self._controller.target - temperature) > config.seed_max_error:
             return 0.0
-        return share * 100.0 / self._controller.gain_scale(temperature, self._last_buffer)
+        return share * 100.0 / self._controller.gain_scale(temperature, self._last_water)
 
     def _drive_thermostat(
         self,
