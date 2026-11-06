@@ -1,6 +1,6 @@
 import unittest
 
-from custom_components.what_the_heat.core.cycle import CycleConfig, CycleScheduler, cycle_length_s
+from custom_components.what_the_heat.core.cycle import CycleScheduler
 
 MINUTE = 60.0
 
@@ -20,18 +20,32 @@ def runs_of(states: list[bool]) -> list[tuple[bool, int]]:
     return runs[1:-1]
 
 
-class CycleLengthTest(unittest.TestCase):
-    def test_mid_duty_uses_the_shortest_cycle(self) -> None:
-        self.assertEqual(cycle_length_s(50.0, CycleConfig()), 30 * MINUTE)
+class DemandChangeTest(unittest.TestCase):
+    def test_a_very_low_duty_does_not_keep_the_valve_closed_for_long(self) -> None:
+        # A room cooling through its target passes through very low duties on the way.
+        scheduler = CycleScheduler()
+        run(scheduler, 1.0, 1)
+        self.assertFalse(scheduler.is_open)
+        states = run(scheduler, 50.0, 60, start_s=MINUTE)
+        self.assertEqual(states.index(True), 29)
 
-    def test_low_duty_extends_the_cycle(self) -> None:
-        self.assertEqual(cycle_length_s(10.0, CycleConfig()), 50 * MINUTE)
+    def test_a_very_high_duty_does_not_keep_the_valve_open_for_long(self) -> None:
+        scheduler = CycleScheduler()
+        run(scheduler, 99.0, 1)
+        self.assertTrue(scheduler.is_open)
+        states = run(scheduler, 50.0, 60, start_s=MINUTE)
+        self.assertEqual(states.index(False), 44)
 
-    def test_high_duty_extends_the_cycle(self) -> None:
-        self.assertAlmostEqual(cycle_length_s(90.0, CycleConfig()), 50 * MINUTE)
+    def test_a_low_duty_is_delivered_by_skipping_cycles(self) -> None:
+        states = run(CycleScheduler(), 5.0, 120)
+        self.assertEqual(states[:90], [False] * 90)
+        self.assertEqual(states[90:96], [True] * 6)
+        self.assertFalse(states[96])
 
-    def test_cycle_is_capped(self) -> None:
-        self.assertEqual(cycle_length_s(1.0, CycleConfig()), 180 * MINUTE)
+    def test_a_high_duty_closes_only_now_and_then(self) -> None:
+        states = run(CycleScheduler(), 97.0, 180)
+        self.assertTrue(all(states[:150]))
+        self.assertEqual(states.count(False), 5)
 
 
 class CycleSchedulerTest(unittest.TestCase):

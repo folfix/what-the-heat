@@ -195,10 +195,9 @@ Worked example with `k1 = 0.27`, `k3 = 0.94`, target 21 °C, 3 °C outdoors: `L 
 - PID in normalised power units, so that the duty scales correctly with the water temperature. Integration pauses at saturation, while a window is open, without valid data, and when the thermostat acts outside the L0 band.
 - Until `k3` is learned, the floor is assumed to be 3 K warmer than the air when scaling for the water temperature.
 - Integration runs four times faster while the error exceeds 0.3 K. Without this, a room recovering from a cold start crawls over the last degree for many hours, because the integral starts near zero. No initial estimate of the room's demand is needed. The integral is kept across restarts, so a room that was switched off recovers faster.
-- Cycle length: `max(30, 5 / d, 5 / (1 - d))` minutes, capped at 180, where `d` is the duty as a fraction. This gives the algorithm-selected frequency required in 2.3: never a pulse shorter than 5 minutes, and longer cycles at extreme duties.
+- Cycle length: 30 minutes at any duty, never a pulse shorter than 5 minutes.
 - The 5 minutes leave an actuator, which takes 2 to 3 minutes to move, time to pass water. The minimum stays although the actuators tolerate frequent movement, because a shorter pulse would pass little or none.
-- On-time that is too short to run is carried over to the next cycle.
-- Above about 97% duty the valve simply stays open, which also means fewer writes.
+- On-time that is too short to run is carried over to the next cycle, so a very low duty skips cycles and a very high one closes only now and then. Low and high duties therefore no longer stretch the cycle. Demand is only looked at when a cycle starts, and a stretched cycle of up to 3 hours left a real room cooling behind a closed valve until the duty reached 100%, down to 0.6 °C below its target.
 - Zones are staggered in phase, so the load stays even and the loops do not all close at once. Zones are not run strictly in sequence, since heating several at once is better for the source.
 
 ### 6.5 L2: prediction
@@ -278,7 +277,7 @@ docs/
 | `kp` | 80 %/K | pilot simulation (hass-ufh-controller: 50) |
 | `ki` | 0.0005 %/(K·s), i.e. 1.8% per K·h | pilot simulation (hass-ufh-controller: 0.001) |
 | Faster integration | 4 times, while the error exceeds 0.3 K | pilot simulation |
-| Cycle length | 30-180 min | owner, compared in simulation (8.8) |
+| Cycle length | 30 min | owner, compared in simulation (8.8) |
 | Minimum open and closed time | 5 min | actuator travel plus time to pass water |
 | Actuator travel | 2-3 min, not measured | owner |
 | Setpoint band | target ±3 °C | this project, wider than the thermostat's dead zone |
@@ -409,6 +408,10 @@ Compared on the simulator with the implemented controller and 2.5 minute actuato
 These ranges leave out a room with heavy air near its limit, at about 90% duty, where the window made little difference to the RMS deviation: 0.30 against 0.28 °C at 34 °C water and -8 °C, and 0.21 against 0.22 °C at 30 °C water and 3 °C. In that second case the time within ±0.3 °C fell from 100% to 76%. A 3 minute minimum gave nearly the same results as 5 minutes.
 
 A rough figure for a real room: on a plain thermostat, the reading of one room moved about 0.6 K/h in both directions and reacted within about 10 to 20 minutes. At 50% duty that suggests a swing of about 0.15 K with this window, against about 0.45 K with 90 minutes. This comes from the slope and has not been measured under the controller.
+
+The first real night with this window, in that room at 30 °C water: from 03:30 to 09:06 the reading stayed within 22.7-23.0 °C at a 23 °C target, with a mean of 22.84 °C and the valve open 51% of the time. On a plain thermostat, on a day without sun and at an unknown water temperature, it moved within 22.7-23.3 °C. The mean was still low because the integral was catching up.
+
+Cycles stretched at extreme duties were compared with a fixed 30 minutes, on five room types with a daily sun peak of 800 or 1500 W at 34 °C water, and 800 W at 30 °C. The lowest temperature after the sun rose in most cases, for example from 20.45 to 20.87 °C and from 20.07 to 20.69 °C at a 21 °C target. Without sun the results stayed about the same, with fewer writes in mild weather. The table above comes from before the cycle was fixed, so it still shows the stretched variant.
 
 ---
 

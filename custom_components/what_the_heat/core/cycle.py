@@ -7,26 +7,14 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class CycleConfig:
-    """Timing limits for the valve."""
+    """Timing of the valve."""
 
-    min_cycle_s: float = 30 * 60.0
-    max_cycle_s: float = 180 * 60.0
+    # Demand is only looked at when a cycle starts, so a longer cycle leaves a room cooling
+    # behind a closed valve for longer. The length therefore does not depend on the duty.
+    cycle_s: float = 30 * 60.0
     # An actuator takes 2 to 3 minutes to move, so a shorter pulse passes little or no water.
     min_on_s: float = 5 * 60.0
     min_off_s: float = 5 * 60.0
-
-
-def cycle_length_s(duty_percent: float, config: CycleConfig) -> float:
-    """Return the cycle length for a duty.
-
-    Cycles get longer at extreme duties, so that neither the open nor the closed part
-    becomes shorter than its minimum.
-    """
-    fraction = duty_percent / 100.0
-    if fraction <= 0.0 or fraction >= 1.0:
-        return config.min_cycle_s
-    needed = max(config.min_cycle_s, config.min_on_s / fraction, config.min_off_s / (1.0 - fraction))
-    return min(config.max_cycle_s, needed)
 
 
 class CycleScheduler:
@@ -78,7 +66,7 @@ class CycleScheduler:
     def _plan(self, now_s: float, duty_percent: float) -> None:
         config = self._config
         duty_percent = min(100.0, max(0.0, duty_percent))
-        length = cycle_length_s(duty_percent, config)
+        length = config.cycle_s
         wanted = duty_percent / 100.0 * length + self._carry_s
         if duty_percent <= 0.0 or wanted < config.min_on_s:
             on_time = 0.0
