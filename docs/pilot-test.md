@@ -90,7 +90,9 @@ If Home Assistant stops, the thermostat keeps its last setpoint, so the room slo
 
 ## 7. Collecting results
 
-On the device page, use **Download diagnostics**. The file contains the settings and one row per day, including comfort metrics, heating share, mean temperatures, writes, the day's PV energy and the mean sun correction. `active_pct` tells baseline days and controlled days apart. What the room learned about the sun is under `runner` and `learned`.
+Use **Download full report** at the bottom of the **What the Heat** page. It saves one file with the last 7 days of all rooms: the recorded history of the thermostats, the outdoor and PV sensors and the rooms' own entities, and everything below. It needs the recorder, which Home Assistant runs by default.
+
+For a single room, use **Download diagnostics** on its device page. The file contains the settings and one row per day, including comfort metrics, heating share, mean temperatures, writes, the day's PV energy and the mean sun correction. `active_pct` tells baseline days and controlled days apart. What the room learned about the sun is under `runner` and `learned`.
 
 ## 8. Logs
 

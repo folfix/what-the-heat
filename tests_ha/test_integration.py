@@ -23,6 +23,7 @@ from pytest_homeassistant_custom_component.common import (
     async_fire_time_changed,
     async_mock_service,
 )
+from pytest_homeassistant_custom_component.components.recorder.common import async_wait_recording_done
 
 from custom_components.what_the_heat.const import (
     CONF_OUTDOOR_ENTITY,
@@ -846,6 +847,55 @@ async def test_removing_a_room_deletes_its_stored_state(hass: HomeAssistant, has
     await hass.config_entries.async_remove(entry.entry_id)
     await hass.async_block_till_done()
     assert entry_key not in hass_storage
+
+
+async def test_the_full_report_holds_the_history_and_what_was_learned(
+    recorder_mock, hass: HomeAssistant, hass_client, set_temperature_calls
+) -> None:
+    assert await async_setup_component(hass, "http", {})
+    set_thermostat(hass, temperature=20.5, setpoint=24.0, action="heating")
+    hass.states.async_set(OUTDOOR, "-3.0", {"unit_of_measurement": "°C", "device_class": "temperature"})
+    hass.states.async_set(PV, "1500", {"unit_of_measurement": "W", "device_class": "power"})
+    await add_settings(hass, **{CONF_OUTDOOR_ENTITY: OUTDOOR, CONF_PV_ENTITY: PV})
+    entry = await add_room(hass)
+    set_thermostat(hass, temperature=20.6, setpoint=24.0, action="heating")
+    await tick(hass, entry)
+    await async_wait_recording_done(hass)
+    client = await hass_client()
+    response = await client.get("/api/what_the_heat/report")
+    assert response.status == 200
+    assert "attachment" in response.headers["Content-Disposition"]
+    report = await response.json()
+    assert (report["report"]["integration_version"], report["report"]["days"]) == (VERSION, 7)
+    assert report["shared"]["pv_entity"] == PV
+    room = report["rooms"][0]
+    assert (room["title"], room["thermostat"], room["entities"]["duty"]) == ("Pilot", THERMOSTAT, DUTY)
+    assert room["runner"]["mode"] == "active"
+    assert "sun_profile" in room["learned"]
+    history = report["history"]
+    assert history[THERMOSTAT][-1][1:] == ["heat", 20.6, 24.0, "heating"]
+    assert history[OUTDOOR][-1][1] == -3.0
+    assert history[PV][-1][1] == 1500.0
+    assert DUTY in history
+
+
+async def test_the_report_works_without_a_recorder(hass: HomeAssistant, hass_client) -> None:
+    assert await async_setup_component(hass, "http", {})
+    set_thermostat(hass)
+    await add_room(hass)
+    client = await hass_client()
+    report = await (await client.get("/api/what_the_heat/report?days=3")).json()
+    assert report["report"]["days"] == 3
+    assert report["history"] is None
+    assert len(report["rooms"]) == 1
+
+
+async def test_the_report_needs_a_signed_in_client_and_whole_days(hass: HomeAssistant, hass_client, hass_client_no_auth) -> None:
+    assert await async_setup_component(hass, "http", {})
+    set_thermostat(hass)
+    await add_room(hass)
+    assert (await (await hass_client_no_auth()).get("/api/what_the_heat/report")).status == 401
+    assert (await (await hass_client()).get("/api/what_the_heat/report?days=a")).status == 400
 
 
 def test_version_matches_the_manifest() -> None:

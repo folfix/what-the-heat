@@ -20,3 +20,13 @@ if sys.platform == "win32":
 def auto_enable_custom_integrations(enable_custom_integrations):
     """Let Home Assistant load the integration from this repository."""
     return
+
+
+@pytest.fixture
+def mock_recorder_before_hass(request: pytest.FixtureRequest) -> None:
+    """Prepare the recorder's database before Home Assistant starts, for tests that use it.
+
+    Home Assistant starts early here, for the fixture above, and the database must exist first.
+    """
+    if "recorder_mock" in request.fixturenames:
+        request.getfixturevalue("recorder_db_url")

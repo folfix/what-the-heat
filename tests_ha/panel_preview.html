@@ -74,6 +74,14 @@
       if (service === "set_temperature") room.target = data.temperature;
       panel.hass = build();
     };
+    // Stands in for the report that the integration makes from the recorder.
+    hass.fetchWithAuth = async () => {
+      await new Promise((resolve) => setTimeout(resolve, 800));
+      const report = { report: { days: 7 }, rooms: rooms.map((room) => ({ title: room.name })), history: {} };
+      return new Response(JSON.stringify(report), {
+        headers: { "Content-Type": "application/json", "Content-Disposition": 'attachment; filename="what-the-heat-report-preview.json"' },
+      });
+    };
     return hass;
   };
   panel.hass = build();

@@ -108,6 +108,10 @@
     .foot { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 12px; font-size: 12px; color: var(--secondary-text-color, #666); }
     a { color: var(--primary-color, #03a9f4); }
     .empty { padding: 32px 16px; text-align: center; color: var(--secondary-text-color, #666); }
+    .report { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; padding: 12px 16px; margin-top: 16px; }
+    .report span { font-size: 12px; color: var(--secondary-text-color, #666); }
+    .report button { min-height: 40px; padding: 4px 16px; font-size: 14px; }
+    button:disabled { opacity: 0.6; cursor: default; }
     @media (max-width: 360px) { .current { font-size: 32px; } }
   `;
 
@@ -191,13 +195,52 @@
       this.shadowRoot.innerHTML = `
         <style>${STYLE}</style>
         <header>${menu}<h1>What the Heat</h1>${VERSION ? `<span class="version">${escapeHtml(VERSION)}</span>` : ""}</header>
-        <main>${rooms.length ? this._summary(rooms) + `<div class="rooms">${rooms.map((room) => this._room(room)).join("")}</div>` : this._empty()}</main>
+        <main>${rooms.length ? this._summary(rooms) + `<div class="rooms">${rooms.map((room) => this._room(room)).join("")}</div>` + this._report() : this._empty()}</main>
       `;
       const button = this.shadowRoot.querySelector("ha-menu-button");
       if (button) {
         button.hass = this._hass;
         button.narrow = this._narrow;
       }
+    }
+
+    _report() {
+      const note = this._reportNote || "The last 7 days in one file: thermostats, outdoor and PV history, and everything the rooms have learned.";
+      const label = this._reportBusy ? "Preparing…" : "Download full report";
+      return `<div class="card report"><span role="status">${escapeHtml(note)}</span><button data-action="report" ${this._reportBusy ? "disabled" : ""}>${label}</button></div>`;
+    }
+
+    async _downloadReport() {
+      if (this._reportBusy) return;
+      this._reportBusy = true;
+      this._reportNote = null;
+      this._refresh();
+      try {
+        const response = await this._hass.fetchWithAuth(`/api/${PLATFORM}/report?days=7`);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const named = (response.headers.get("Content-Disposition") || "").match(/filename="([^"]+)"/);
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = named ? named[1] : "what-the-heat-report.json";
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 10000);
+        const size = blob.size >= 1e6 ? `${this._format(blob.size / 1e6, 1)} MB` : `${this._format(Math.max(1, blob.size / 1e3), 0)} kB`;
+        this._reportNote = `Saved ${link.download}, ${size}.`;
+      } catch (error) {
+        this._reportNote = `The report could not be made: ${error.message}.`;
+      }
+      this._reportBusy = false;
+      this._refresh();
+    }
+
+    // Renders again even though no entity has changed.
+    _refresh() {
+      this._signature = null;
+      this._update();
     }
 
     _empty() {
@@ -318,6 +361,10 @@
     _onClick(event) {
       const button = event.target.closest("button[data-action]");
       if (!button) return;
+      if (button.dataset.action === "report") {
+        this._downloadReport();
+        return;
+      }
       if (button.dataset.action === "water") {
         this._changeWater(Number(button.dataset.delta));
         return;

@@ -72,7 +72,8 @@ Prediction from the weather forecast and the rest of per-room learning, such as 
 
 - **Sidebar:** the **What the Heat** page shows all rooms as tiles, where you can change each room's target and the water temperature, and see what each room has learned.
 - **Dashboards:** each room has a thermostat entity for a regular tile or thermostat card, along with separate sensors.
-- **Diagnostics:** the file you can download on the device page contains one row per day.
+- **Full report:** the **Download full report** button at the bottom of the **What the Heat** page saves one JSON file with the last 7 days of all rooms: the recorded history of the thermostats, the outdoor and PV sensors and the rooms' own entities, everything each room has learned, the daily rows and the shared settings. It holds your entity names and room titles, so keep it private.
+- **Diagnostics:** the file you can download on a room's device page contains its settings, what it has learned and one row per day.
 - **Logs:** see the [pilot test guide](docs/pilot-test.md).
 
 ## Status

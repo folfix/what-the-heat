@@ -27,10 +27,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     from .coordinator import ZoneCoordinator  # noqa: PLC0415
     from .panel import async_add_panel  # noqa: PLC0415
+    from .report import register_report  # noqa: PLC0415
     from .settings import register_services  # noqa: PLC0415
 
     settings = await async_get_settings(hass)
     register_services(hass, settings)
+    register_report(hass)
     coordinator = ZoneCoordinator(hass, entry, settings)
     await coordinator.async_load()
     await coordinator.async_config_entry_first_refresh()
