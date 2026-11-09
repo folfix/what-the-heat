@@ -27,9 +27,12 @@ from pytest_homeassistant_custom_component.common import (
 from custom_components.what_the_heat.const import (
     CONF_OUTDOOR_ENTITY,
     CONF_PHASE_OFFSET,
+    CONF_PV_ENTITY,
     CONF_TARGET,
     CONF_THERMOSTAT,
+    CONF_WATER_TEMPERATURE,
     DOMAIN,
+    SETTINGS_ID,
     VERSION,
 )
 from custom_components.what_the_heat.coordinator import merged_config
@@ -109,23 +112,41 @@ async def add_room(hass: HomeAssistant, title: str = "Pilot", thermostat: str = 
     return entry
 
 
+async def add_stored_room(hass: HomeAssistant, hass_storage, **runner) -> MockConfigEntry:
+    """A room that already ran, with the given saved controller state."""
+    entry = room_entry()
+    entry.add_to_hass(hass)
+    key = f"{DOMAIN}.{entry.entry_id}"
+    hass_storage[key] = {"version": 1, "minor_version": 1, "key": key, "data": {"runner": runner}}
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    return entry
+
+
 async def select_mode(hass: HomeAssistant, mode: str) -> None:
     await hass.services.async_call("select", "select_option", {"entity_id": MODE, "option": mode}, blocking=True)
     await hass.async_block_till_done()
 
 
-async def set_water(hass: HomeAssistant, temperature: float) -> None:
-    await hass.services.async_call(DOMAIN, "set_water_temperature", {"temperature": temperature}, blocking=True)
+def settings_entry(**options) -> MockConfigEntry:
+    return MockConfigEntry(domain=DOMAIN, title="Shared settings", unique_id=SETTINGS_ID, data={}, options=options)
+
+
+async def add_settings(hass: HomeAssistant, **options) -> MockConfigEntry:
+    entry = settings_entry(**options)
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
+    return entry
 
 
-async def set_sensors(hass: HomeAssistant, **sensors: str) -> None:
-    await hass.services.async_call(DOMAIN, "set_sensors", sensors, blocking=True)
+async def change_settings(hass: HomeAssistant, entry: MockConfigEntry, **options) -> None:
+    """Change the shared settings with Configure, as the owner would."""
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    assert result["step_id"] == "settings"
+    result = await hass.config_entries.options.async_configure(result["flow_id"], options)
+    assert result["type"] is FlowResultType.CREATE_ENTRY
     await hass.async_block_till_done()
-
-
-def store_settings(hass_storage, **data) -> None:
-    hass_storage[f"{DOMAIN}.settings"] = {"version": 1, "minor_version": 1, "key": f"{DOMAIN}.settings", "data": data}
 
 
 async def tick(hass: HomeAssistant, entry: MockConfigEntry) -> None:
@@ -133,8 +154,23 @@ async def tick(hass: HomeAssistant, entry: MockConfigEntry) -> None:
     await hass.async_block_till_done()
 
 
+async def test_the_first_setup_asks_for_the_shared_settings(hass: HomeAssistant) -> None:
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
+    assert result["step_id"] == "settings"
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_WATER_TEMPERATURE: 32.0, CONF_PV_ENTITY: PV}
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["title"] == "Shared settings"
+    assert result["result"].options == {CONF_WATER_TEMPERATURE: 32.0, CONF_PV_ENTITY: PV}
+    await hass.async_block_till_done()
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
+    assert result["step_id"] == "user"
+
+
 async def test_add_a_room_through_the_form(hass: HomeAssistant) -> None:
     set_thermostat(hass)
+    await add_settings(hass)
     result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
     assert result["type"] is FlowResultType.FORM
     result = await hass.config_entries.flow.async_configure(
@@ -144,11 +180,12 @@ async def test_add_a_room_through_the_form(hass: HomeAssistant) -> None:
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert result["title"] == "Pilot"
     await hass.async_block_till_done()
-    assert hass.states.get(MODE).state == "observe"
+    assert hass.states.get(MODE).state == "active"
 
 
 async def test_a_thermostat_can_belong_to_only_one_room(hass: HomeAssistant) -> None:
     set_thermostat(hass)
+    await add_settings(hass)
     await add_room(hass)
     result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
     result = await hass.config_entries.flow.async_configure(
@@ -180,9 +217,17 @@ async def test_an_outdoor_sensor_set_on_a_room_is_left_out(hass: HomeAssistant) 
     assert result["today"]["outdoor_mean"] is None
 
 
-async def test_new_room_observes_and_writes_nothing(hass: HomeAssistant, set_temperature_calls, set_hvac_mode_calls) -> None:
+async def test_new_room_takes_control_right_away(hass: HomeAssistant, set_temperature_calls, set_hvac_mode_calls) -> None:
     set_thermostat(hass, temperature=18.0, setpoint=15.0, state="off", action="off")
-    entry = await add_room(hass)
+    await add_room(hass)
+    assert hass.states.get(MODE).state == "active"
+    assert [call.data["hvac_mode"] for call in set_hvac_mode_calls] == ["heat"]
+    assert [call.data["temperature"] for call in set_temperature_calls] == [24.0]
+
+
+async def test_observe_mode_writes_nothing(hass: HomeAssistant, hass_storage, set_temperature_calls, set_hvac_mode_calls) -> None:
+    set_thermostat(hass, temperature=18.0, setpoint=15.0, state="off", action="off")
+    entry = await add_stored_room(hass, hass_storage, mode="observe")
     for _ in range(5):
         await tick(hass, entry)
     assert hass.states.get(MODE).state == "observe"
@@ -208,9 +253,9 @@ async def test_decisions_and_commands_are_logged(hass: HomeAssistant, set_temper
     set_thermostat(hass, temperature=20.0, setpoint=15.0)
     await add_room(hass)
     assert "duty=" in caplog.text
-    await select_mode(hass, "active")
-    assert "mode observe -> active" in caplog.text
     assert "set_temperature {'temperature': 24.0}" in caplog.text
+    await select_mode(hass, "handback")
+    assert "mode active -> handback" in caplog.text
 
 
 async def test_active_mode_switches_on_a_thermostat_that_is_off(
@@ -296,7 +341,7 @@ async def test_room_has_its_own_thermostat_entity(hass: HomeAssistant) -> None:
     assert state.state == "heat"
     assert state.attributes["current_temperature"] == 20.2
     assert state.attributes["temperature"] == 21.0
-    assert state.attributes["preset_mode"] == "observe"
+    assert state.attributes["preset_mode"] == "active"
     assert state.attributes["hvac_action"] == "idle"
 
 
@@ -320,6 +365,7 @@ async def test_thermostat_entity_changes_target_and_mode(hass: HomeAssistant) ->
 
 async def test_a_room_cannot_control_its_own_entity(hass: HomeAssistant) -> None:
     set_thermostat(hass)
+    await add_settings(hass)
     await add_room(hass)
     result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
     result = await hass.config_entries.flow.async_configure(
@@ -351,35 +397,26 @@ async def test_water_temperature_defaults_to_30(hass: HomeAssistant) -> None:
 async def test_water_temperature_is_shared_by_all_rooms(hass: HomeAssistant) -> None:
     set_thermostat(hass)
     set_thermostat(hass, entity_id="climate.other_thermostat")
+    settings = await add_settings(hass)
     await add_room(hass)
     await add_room(hass, title="Other", thermostat="climate.other_thermostat")
-    await set_water(hass, 32.5)
+    await change_settings(hass, settings, **{CONF_WATER_TEMPERATURE: 32.5})
     assert float(hass.states.get(WATER).state) == 32.5
     assert float(hass.states.get("sensor.other_water_temperature").state) == 32.5
 
 
 async def test_water_temperature_scales_the_duty(hass: HomeAssistant) -> None:
     set_thermostat(hass, temperature=20.7)
+    settings = await add_settings(hass)
     await add_room(hass)
     cool = float(hass.states.get(DUTY).state)
-    await set_water(hass, 38.0)
+    await change_settings(hass, settings, **{CONF_WATER_TEMPERATURE: 38.0})
     assert float(hass.states.get(DUTY).state) < cool
 
 
-async def test_water_temperature_is_saved(hass: HomeAssistant, hass_storage) -> None:
-    set_thermostat(hass)
-    await add_room(hass)
-    await set_water(hass, 31.0)
-    assert hass_storage[f"{DOMAIN}.settings"]["data"]["water_temperature"] == 31.0
-
-
-async def test_saved_water_temperature_is_restored(hass: HomeAssistant, hass_storage) -> None:
-    hass_storage[f"{DOMAIN}.settings"] = {
-        "version": 1,
-        "minor_version": 1,
-        "key": f"{DOMAIN}.settings",
-        "data": {"water_temperature": 33.0},
-    }
+async def test_a_room_starts_with_the_shared_settings_already_there(hass: HomeAssistant) -> None:
+    # Home Assistant may start a room before the settings entry, so the room reads it itself.
+    settings_entry(**{CONF_WATER_TEMPERATURE: 33.0}).add_to_hass(hass)
     set_thermostat(hass)
     await add_room(hass)
     assert float(hass.states.get(WATER).state) == 33.0
@@ -387,33 +424,32 @@ async def test_saved_water_temperature_is_restored(hass: HomeAssistant, hass_sto
 
 async def test_water_temperature_stays_within_limits(hass: HomeAssistant) -> None:
     set_thermostat(hass)
+    settings = await add_settings(hass)
     await add_room(hass)
     for value in (19.5, 38.5):
         with pytest.raises(vol.Invalid):
-            await set_water(hass, value)
+            await change_settings(hass, settings, **{CONF_WATER_TEMPERATURE: value})
     assert float(hass.states.get(WATER).state) == 30.0
 
 
-async def test_shared_sensors_are_saved_and_can_be_removed(hass: HomeAssistant, hass_storage) -> None:
+async def test_a_shared_sensor_can_be_removed(hass: HomeAssistant) -> None:
     set_thermostat(hass)
+    hass.states.async_set(PV, "4000", {"unit_of_measurement": "W", "device_class": "power"})
+    settings = await add_settings(hass, **{CONF_PV_ENTITY: PV})
     await add_room(hass)
-    await set_sensors(hass, outdoor_entity=OUTDOOR, pv_entity=PV)
-    saved = hass_storage[f"{DOMAIN}.settings"]["data"]
-    assert (saved["outdoor_entity"], saved["pv_entity"]) == (OUTDOOR, PV)
-    await set_sensors(hass, pv_entity="")
-    saved = hass_storage[f"{DOMAIN}.settings"]["data"]
-    assert (saved["outdoor_entity"], saved["pv_entity"]) == (OUTDOOR, None)
+    assert hass.states.get(SUN).state != "unknown"
+    await change_settings(hass, settings, **{CONF_WATER_TEMPERATURE: 30.0})
+    assert hass.states.get(SUN).state == "unknown"
 
 
-async def test_the_page_reads_the_shared_settings(hass: HomeAssistant, hass_ws_client) -> None:
+async def test_without_the_shared_settings_rooms_use_the_defaults(hass: HomeAssistant) -> None:
     set_thermostat(hass)
+    settings = await add_settings(hass, **{CONF_WATER_TEMPERATURE: 34.0})
     await add_room(hass)
-    await set_sensors(hass, pv_entity=PV)
-    client = await hass_ws_client(hass)
-    await client.send_json({"id": 1, "type": f"{DOMAIN}/settings"})
-    response = await client.receive_json()
-    assert response["success"]
-    assert response["result"] == {"water_temperature": 30.0, "outdoor_entity": None, "pv_entity": PV}
+    assert float(hass.states.get(WATER).state) == 34.0
+    await hass.config_entries.async_remove(settings.entry_id)
+    await hass.async_block_till_done()
+    assert float(hass.states.get(WATER).state) == 30.0
 
 
 async def test_without_pv_there_is_no_sun_correction(hass: HomeAssistant) -> None:
@@ -426,7 +462,7 @@ async def test_pv_power_becomes_a_share_of_full_sun_in_any_unit(hass: HomeAssist
     set_thermostat(hass)
     entry = await add_room(hass)
     hass.states.async_set(PV, "4.0", {"unit_of_measurement": "kW", "device_class": "power"})
-    await set_sensors(hass, pv_entity=PV)
+    await add_settings(hass, **{CONF_PV_ENTITY: PV})
     assert hass.states.get(SUN).attributes["sun_pct"] == 100.0
     hass.states.async_set(PV, "1000", {"unit_of_measurement": "W", "device_class": "power"})
     await tick(hass, entry)
@@ -440,7 +476,7 @@ async def test_pv_power_becomes_a_share_of_full_sun_in_any_unit(hass: HomeAssist
 async def test_what_a_room_learned_about_the_sun_is_restored_and_used(hass: HomeAssistant, hass_storage, set_temperature_calls) -> None:
     set_thermostat(hass, temperature=21.0, setpoint=24.0, action="heating")
     hass.states.async_set(PV, "4000", {"unit_of_measurement": "W", "device_class": "power"})
-    store_settings(hass_storage, pv_entity=PV)
+    settings_entry(**{CONF_PV_ENTITY: PV}).add_to_hass(hass)
     entry = room_entry()
     entry.add_to_hass(hass)
     hass_storage[f"{DOMAIN}.{entry.entry_id}"] = {
@@ -502,6 +538,8 @@ async def test_a_running_room_from_an_older_version_keeps_working(
 async def test_sidebar_panel_follows_the_rooms(hass: HomeAssistant) -> None:
     hass.http = Mock(async_register_static_paths=AsyncMock())
     set_thermostat(hass)
+    # The shared settings are no room, so they do not keep the page.
+    await add_settings(hass)
     entry = await add_room(hass)
     panels = hass.data[DATA_PANELS]
     assert PANEL_URL_PATH in panels
@@ -557,9 +595,9 @@ async def test_unload_gives_the_target_back_when_active(hass: HomeAssistant, set
     assert set_temperature_calls[-1].data["temperature"] == 21.0
 
 
-async def test_unload_writes_nothing_when_observing(hass: HomeAssistant, set_temperature_calls) -> None:
+async def test_unload_writes_nothing_when_observing(hass: HomeAssistant, hass_storage, set_temperature_calls) -> None:
     set_thermostat(hass, temperature=20.0, setpoint=15.0)
-    entry = await add_room(hass)
+    entry = await add_stored_room(hass, hass_storage, mode="observe")
     assert await hass.config_entries.async_unload(entry.entry_id)
     assert set_temperature_calls == []
 
@@ -637,7 +675,7 @@ async def test_new_room_has_learned_nothing(hass: HomeAssistant) -> None:
     await add_room(hass)
     state = hass.states.get(LEARNED)
     assert state.state == "unknown"
-    assert state.attributes["source"] == "thermostat"
+    assert state.attributes["source"] == "controller"
     assert state.attributes["learned_from_hours"] == 0.0
     assert state.attributes["recent_heating_pct"] is None
 
@@ -684,18 +722,18 @@ async def test_reset_survives_a_reload(hass: HomeAssistant, hass_storage, set_te
     assert hass.states.get(LEARNED).state == "unknown"
 
 
-async def test_reset_while_observing_writes_nothing(hass: HomeAssistant, set_temperature_calls) -> None:
+async def test_reset_while_observing_writes_nothing(hass: HomeAssistant, hass_storage, set_temperature_calls) -> None:
     set_thermostat(hass, temperature=20.0, setpoint=15.0)
-    await add_room(hass)
+    await add_stored_room(hass, hass_storage, mode="observe")
     await press_reset(hass)
     assert set_temperature_calls == []
 
 
-async def test_diagnostics_contain_the_daily_measurements(hass: HomeAssistant, hass_storage) -> None:
+async def test_diagnostics_contain_the_daily_measurements(hass: HomeAssistant) -> None:
     set_thermostat(hass)
     hass.states.async_set(OUTDOOR, "4.2")
     hass.states.async_set(PV, "3600", {"unit_of_measurement": "W", "device_class": "power"})
-    store_settings(hass_storage, outdoor_entity=OUTDOOR, pv_entity=PV)
+    settings = await add_settings(hass, **{CONF_OUTDOOR_ENTITY: OUTDOOR, CONF_PV_ENTITY: PV})
     entry = await add_room(hass)
     await asyncio.sleep(0.01)
     await tick(hass, entry)
@@ -703,14 +741,16 @@ async def test_diagnostics_contain_the_daily_measurements(hass: HomeAssistant, h
     assert result["config"][CONF_THERMOSTAT] == THERMOSTAT
     assert result["shared"]["outdoor_entity"] == OUTDOOR
     assert result["shared"]["sun"]["reference_w"] == 3600.0
-    assert result["runner"]["mode"] == "observe"
-    assert result["learned"]["source"] == "thermostat"
+    assert result["runner"]["mode"] == "active"
+    assert result["learned"]["source"] == "controller"
     assert result["learned"]["sunny_days"] == 0
     assert result["today"]["date"] == dt_util.now().date().isoformat()
     assert result["today"]["outdoor_mean"] == 4.2
     assert result["today"]["water_mean"] == 30.0
     assert result["today"]["pv_kwh"] is not None
     assert result["days"] == []
+    shared = await async_get_config_entry_diagnostics(hass, settings)
+    assert shared == {"shared": result["shared"]}
 
 
 async def test_state_is_saved_regularly(hass: HomeAssistant, hass_storage, freezer) -> None:
@@ -726,7 +766,7 @@ async def test_state_is_saved_regularly(hass: HomeAssistant, hass_storage, freez
     freezer.tick(timedelta(seconds=2))
     async_fire_time_changed(hass)
     await hass.async_block_till_done()
-    assert hass_storage[key]["data"]["runner"]["mode"] == "observe"
+    assert hass_storage[key]["data"]["runner"]["mode"] == "active"
 
 
 async def test_removing_a_room_deletes_its_stored_state(hass: HomeAssistant, hass_storage) -> None:

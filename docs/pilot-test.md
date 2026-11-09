@@ -14,9 +14,23 @@ Without HACS: copy `custom_components/what_the_heat` to `/config/custom_componen
 
 Restart Home Assistant in both cases.
 
-## 2. Add the room
+## 2. Add the shared settings and the room
 
 **Settings → Devices & services → Add integration → What the Heat**
+
+The first time, the form asks for the settings shared by all rooms:
+
+| Field | Value |
+|---|---|
+| Water temperature | What the mixing valves are set to. The default is 30 °C. |
+| Outdoor temperature sensor | The outdoor sensor. It is only logged for now. |
+| PV power sensor | The power of a PV installation, if there is one, preferably read locally. Each room then learns what the sun does to it. |
+
+They become the **Shared settings** entry of the integration. Change them later with **Configure** on that entry.
+
+Before adding the room, check the thermostat's own dead zone, which Meross LAN shows as a separate number entity. It should be at most about 2.5 °C. With a wider one, the setpoints the controller uses may not switch the thermostat while the room is near its target, so lower it.
+
+Then add the room with **Add entry**:
 
 | Field | Value |
 |---|---|
@@ -25,18 +39,14 @@ Restart Home Assistant in both cases.
 | Target temperature | 21 |
 | Delay of the first cycle | 0 |
 
-A new room starts in **Observe** mode. It writes nothing to the thermostat, so this step is safe.
-
-Then open the **What the Heat** page in the sidebar. These settings are shared by all rooms:
-
-- **Water temperature:** what the mixing valves are set to. The default is 30 °C.
-- **Outdoor temperature:** the outdoor sensor. It is only logged for now.
-- **PV power:** the power of a PV installation, if there is one, preferably read locally. Each room then learns what the sun does to it.
+A new room starts in **Active** mode and takes over the thermostat right away. The thermostat display will alternate between target + 3 °C and target - 3 °C, which is expected.
 
 ## 3. Baseline
 
+For a comparison with the plain thermostat, run a baseline first:
+
 1. Close the room and keep it closed during the test.
-2. Set the thermostat itself to 21 °C. In Observe mode the integration does not do this.
+2. Set the room's **Mode** entity to **Observe**. The thermostat gets the plain target back, and from then on nothing is written to it.
 3. Keep the mixing valve at the same temperature for both the baseline and the controlled period. Any change also affects the other rooms on that floor.
 4. Wait until the room has warmed up, then for several more days. The first days are not representative, since walls and soil warm slowly.
 
@@ -44,9 +54,7 @@ The integration measures this period too, which provides the comparison.
 
 ## 4. Take over
 
-First check the thermostat's own dead zone, which Meross LAN shows as a separate number entity. It should be at most about 2.5 °C. With a wider one, the setpoints below may not switch the thermostat while the room is near its target, so lower it.
-
-Set the mode to **Active**, either with the **Mode** entity or on the **What the Heat** page in the sidebar, where a second click confirms it. The thermostat display will now alternate between target + 3 °C and target - 3 °C, which is expected.
+Set the room's **Mode** entity back to **Active**.
 
 While in Active mode:
 - Change the temperature through the **Target** entity. A change made on the thermostat itself is overwritten within minutes.
@@ -70,11 +78,11 @@ The **What the Heat** page in the sidebar shows the main values for all rooms, a
 | Resent commands | Commands sent again by the watchdog |
 | Problem | On when something needs attention. The `reasons` attribute says what. |
 
-If something unusual has misled the controller, such as a long open window, use **Reset learning**, as a button on the device page or on the **What the Heat** page, where a second click confirms it. It clears the learned demand and what the room learned about the sun, and keeps the mode, the target and the daily measurements. Expect the room to dip for a while as the controller learns again, so note the moment when comparing results.
+If something unusual has misled the controller, such as a long open window, use the **Reset learning** button on the room's device page. It clears the learned demand and what the room learned about the sun, and keeps the mode, the target and the daily measurements. Expect the room to dip for a while as the controller learns again, so note the moment when comparing results.
 
 ## 6. Stopping
 
-Set the mode to **Hand back to thermostat**. The thermostat gets the plain target once and is then left alone. Going from Active to Observe, or removing or reloading the integration while in Active mode, does the same.
+Set the room's **Mode** entity to **Hand back to thermostat**. The thermostat gets the plain target once and is then left alone. Going from Active to Observe, or removing or reloading the integration while in Active mode, does the same.
 
 If Home Assistant stops, the thermostat keeps its last setpoint, so the room slowly moves toward target + 3 °C or target - 3 °C.
 

@@ -11,7 +11,7 @@ from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.core import HomeAssistant
 
-from .const import DOMAIN, VERSION
+from .const import DOMAIN, VERSION, is_settings_entry
 
 LOGGER = logging.getLogger(__package__)
 
@@ -70,7 +70,7 @@ def remove_panel_if_unused(hass: HomeAssistant, leaving: ConfigEntry) -> None:
     if not hass.data.get(_REGISTERED):
         return
     for entry in hass.config_entries.async_entries(DOMAIN):
-        if entry.entry_id != leaving.entry_id and entry.state is ConfigEntryState.LOADED:
+        if entry.entry_id != leaving.entry_id and not is_settings_entry(entry) and entry.state is ConfigEntryState.LOADED:
             return
     async_remove_panel(hass, PANEL_URL_PATH)
     hass.data[_REGISTERED] = False

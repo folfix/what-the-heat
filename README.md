@@ -27,13 +27,19 @@ If everything stops, the thermostat keeps its last setpoint and holds the room n
 
 | Mode | What it does | Writes to the thermostat |
 |---|---|---|
-| **Observe** | Calculates and measures only. The default for a new room, and useful as a baseline. | Never, apart from returning the target once when leaving Active |
-| **Active** | Controls the thermostat as described above, and keeps it switched on and heating. | About 100 times a day |
+| **Observe** | Calculates and measures only. Useful as a baseline. | Never, apart from returning the target once when leaving Active |
+| **Active** | Controls the thermostat as described above, and keeps it switched on and heating. The default for a new room. | About 100 times a day |
 | **Hand back** | Gives the plain target to the thermostat, which then regulates on its own. | Once |
+
+A room's mode is changed with its **Mode** entity, or with the preset of its thermostat entity.
+
+### Shared settings
+
+The first time the integration is added, it asks for the settings shared by all rooms, and then each room is added with **Add entry**. These settings rarely change, so they are kept apart from the rooms: change them with **Configure** on the **Shared settings** entry of the integration. Without that entry the rooms use 30 °C water and no sensors.
 
 ### Water temperature
 
-This is one global setting for all rooms, by default 30 °C. Set it to what the mixing valves are set to, on the **What the Heat** page or with the service `what_the_heat.set_water_temperature`.
+This is one setting for all rooms, by default 30 °C. Set it to what the mixing valves are set to.
 
 It only tells the controller what the temperature is: hot water delivers more heat in the same time, so the same demand needs a shorter opening. Nothing is read from or written to the mixing valves, the buffer or the heat pump.
 
@@ -43,7 +49,7 @@ If a room stays at 100% and below its target, the water cannot deliver enough he
 
 ### Outdoor and PV sensors
 
-These are shared by all rooms too, and set on the **What the Heat** page or with the service `what_the_heat.set_sensors`. Neither is required.
+These are shared settings too. Neither is required.
 
 - **Outdoor temperature:** only logged for now, for learning later.
 - **PV power:** the current power of a PV installation, in W or kW. It is the sun signal described below. Use one read locally, since a cloud service may stop for hours.
@@ -54,7 +60,7 @@ These are shared by all rooms too, and set on the **What the Heat** page or with
 
 **The sun:** with a PV sensor set, each room in Active mode learns, for every hour of the day, how much less heat it needs while the sun shines. If the room was above its target 2 hours after a sunny hour, that hour asks for less heat the next time the sun shines, and the other way round. After 3 sunny days it starts acting: while the panels see the sun, the valve opens less, in proportion to the PV power compared with the highest seen lately. The panels often see the sun well before the room shows it, so heating that the sun would make unnecessary is left out in advance. It never makes the valve open more. The **Sun correction** sensor shows how much it takes off the valve opening now. In simulated sunny rooms this cut the time above the band by about 30%, at the cost of slightly cooler mornings. It has not yet been measured in a real room.
 
-**Reset learning** clears both when something unusual has misled the controller. The mode, the target and the daily measurements stay. The room needs time to learn again, so expect a temporary dip while the valve stays closed for longer. In simulated rooms the lowest temperature fell by 0.5 to 1.5 °C in most cases, and the room spent up to about half a day outside ±0.3 °C, or about 2.5 days in the slowest case.
+The **Reset learning** button on a room's device page clears both when something unusual has misled the controller. The mode, the target and the daily measurements stay. The room needs time to learn again, so expect a temporary dip while the valve stays closed for longer. In simulated rooms the lowest temperature fell by 0.5 to 1.5 °C in most cases, and the room spent up to about half a day outside ±0.3 °C, or about 2.5 days in the slowest case.
 
 ### Not there yet
 
@@ -62,7 +68,7 @@ Prediction from the weather forecast and the rest of per-room learning, such as 
 
 ### Where to see it
 
-- **Sidebar:** the **What the Heat** page shows all rooms as tiles, where you can change the target and the mode, see what a room has learned and reset it.
+- **Sidebar:** the **What the Heat** page shows all rooms as tiles, where you can change the target and see what each room has learned.
 - **Dashboards:** each room has a thermostat entity for a regular tile or thermostat card, along with separate sensors.
 - **Diagnostics:** the file you can download on the device page contains one row per day.
 - **Logs:** see the [pilot test guide](docs/pilot-test.md).

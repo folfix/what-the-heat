@@ -209,7 +209,7 @@ Worked example with `k1 = 0.27`, `k3 = 0.94`, target 21 °C, 3 °C outdoors: `L 
 
 ### 6.6 Water temperature
 
-- One global value for all rooms, by default 30 °C, in the range 20-38 °C. It is set on the sidebar page or with the service `what_the_heat.set_water_temperature`, and must match the mixing valves.
+- One global value for all rooms, by default 30 °C, in the range 20-38 °C. It is set in the Shared settings entry of the integration (6.9), and must match the mixing valves.
 - It only tells the controller what the temperature is. Nothing is read from or written to the mixing valves, the buffer or the heat pump.
 - It scales the duty, since hotter water delivers the same heat in less time.
 - A room that needs more than the water can deliver stays fully open and below its target. Raising the temperature is then a manual step.
@@ -250,11 +250,11 @@ Valve exercise: any loop idle for 7 days is opened for 15 minutes. The 15 second
 
 ### 6.9 Integration and repository
 
-Each room is one configuration entry. The water temperature and the outdoor and PV sensors are shared by all rooms: they are set on the sidebar page or with the services `set_water_temperature` and `set_sensors`, and stored apart from the rooms. The integration exposes the target, duty, PID terms, sun correction, valve state, status and daily comfort metrics as entities, plus a diagnostics download with one row per day. Each room also has a thermostat entity for dashboards, with the modes as presets. A sidebar page shows all rooms as tiles, using plain JavaScript with no build step. Each zone has a mode: `observe` (calculates and logs only, the default for a new room), `active`, or `handback`.
+Each room is one configuration entry. The water temperature and the outdoor and PV sensors are shared by all rooms and rarely change, so they are kept in one more entry, **Shared settings**, which the first setup of the integration asks for and Configure changes later. Without it the rooms use 30 °C water and no sensors. The integration exposes the target, duty, PID terms, sun correction, valve state, status and daily comfort metrics as entities, plus a diagnostics download with one row per day. Each room also has a thermostat entity for dashboards, with the modes as presets. A sidebar page shows all rooms as tiles, using plain JavaScript with no build step. It changes only the target, and shows the shared water temperature. Each zone has a mode: `active` (the default for a new room), `observe` (calculates and logs only), or `handback`, set with its Mode entity.
 
 On switching from `observe` to `active`, the integral starts from how much the thermostat has recently been heating, but only if the room is near its target. Otherwise it starts from zero.
 
-Until the learning of 6.7 exists, what a room has learned is its steady demand. The `Learned demand` sensor and the sidebar page show it as the valve opening needed at the current water temperature, once at least 6 hours of data are behind it. While `active` it comes from the integral, and only time when the integral could move counts as data, so a cold room warming at full duty learns nothing. Otherwise it comes from the heating share of the thermostat, if the room is near its target. A `Reset learning` button clears the integral, the carried on-time, the heating share, the solar profile and the data counters. It keeps the mode, the target, the counters of writes and the daily rows, which are measurements and not learned. In simulation a reset of a settled room at 34 °C or 38 °C water lowered the minimum by 0.4 to 1.6 °C, and cost 3 to 15 extra hours outside ±0.3 °C in most rooms. The worst cases were a room with high losses at 34 °C with 31 hours, and a room with heavy air at 30 °C with 60 hours.
+Until the learning of 6.7 exists, what a room has learned is its steady demand. The `Learned demand` sensor and the sidebar page show it as the valve opening needed at the current water temperature, once at least 6 hours of data are behind it. While `active` it comes from the integral, and only time when the integral could move counts as data, so a cold room warming at full duty learns nothing. Otherwise it comes from the heating share of the thermostat, if the room is near its target. A `Reset learning` button on the device page clears the integral, the carried on-time, the heating share, the solar profile and the data counters. It keeps the mode, the target, the counters of writes and the daily rows, which are measurements and not learned. In simulation a reset of a settled room at 34 °C or 38 °C water lowered the minimum by 0.4 to 1.6 °C, and cost 3 to 15 extra hours outside ±0.3 °C in most rooms. The worst cases were a room with high losses at 34 °C with 31 hours, and a room with heavy air at 30 °C with 60 hours.
 
 ```
 custom_components/what_the_heat/
@@ -522,7 +522,8 @@ All based on what can be measured: air temperature and valve state.
 | Learning through small per-room layers rather than a neural network | Limited data, explainability, safety |
 | No reading or control of the buffer or heat pump, and one global water temperature | Owner decision: each floor has a mixing valve fixed at 30 °C |
 | PV power, read locally, as the sun signal | It shows the sun as it shines, often hours before a room does, without a cloud service |
-| Outdoor and PV sensors shared by all rooms | One house has one outdoor sensor and one PV installation |
+| Outdoor and PV sensors shared by all rooms, with the water temperature in a Shared settings entry | One house has one outdoor sensor and one PV installation. Owner decision: settings that rarely change belong in the integration's configuration, not on the sidebar page. |
+| A new room starts in active mode, and the sidebar page has no mode or reset buttons | Owner decision. The modes stay available through each room's Mode entity. |
 | First real test on one closed basement room at 21 °C, PID and cycles only | Least outside influence, smallest risk |
 | English only in the repository; work goes straight to the default branch | Owner decision |
 

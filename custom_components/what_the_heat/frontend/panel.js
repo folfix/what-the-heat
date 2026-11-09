@@ -6,24 +6,16 @@
   const PLATFORM = "what_the_heat";
   const ELEMENT = "what-the-heat-panel";
   const VERSION = document.currentScript ? new URL(document.currentScript.src).searchParams.get("v") : null;
-  const CONFIRM_MS = 5000;
-  const MODES = [
-    ["observe", "Observe"],
-    ["active", "Active"],
-    ["handback", "Hand back"],
-  ];
+  // Rooms run in active mode. The other modes are set with a room's Mode entity.
   const MODE_NOTES = {
-    observe: "Calculating only. Nothing is written to the thermostat.",
-    active: "This controller is in charge of the thermostat.",
-    handback: "The thermostat is regulating on its own.",
+    observe: "Observe mode: calculating only. Nothing is written to the thermostat.",
+    handback: "Hand back mode: the thermostat is regulating on its own.",
   };
   const REASONS = {
     thermostat_not_following: "The thermostat is not following commands.",
     thermostat_cannot_heat: "The thermostat cannot heat. Check its summer mode.",
     readings_missing: "Room temperature readings are missing.",
   };
-  const WATER_MIN = 20;
-  const WATER_MAX = 38;
   const UNUSABLE = new Set(["unavailable", "unknown", undefined]);
 
   const STYLE = `
@@ -57,24 +49,6 @@
     .summary b { display: block; font-size: 22px; font-weight: 500; font-variant-numeric: tabular-nums; }
     .summary span { font-size: 12px; color: var(--secondary-text-color, #666); }
     .summary .alert b { color: var(--error-color, #db4437); }
-    .summary .water { display: flex; align-items: center; gap: 4px; margin-left: auto; }
-    .summary .water .water-value { min-width: 96px; text-align: center; }
-    .summary .water b { font-size: 18px; }
-    @media (max-width: 520px) { .summary .water { margin-left: 0; width: 100%; justify-content: space-between; } }
-    .sensors { display: grid; gap: 12px 24px; grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr)); padding: 12px 16px; margin-bottom: 16px; }
-    .sensors label { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-    .sensors span, .sensors small { font-size: 12px; color: var(--secondary-text-color, #666); }
-    select {
-      width: 100%;
-      min-height: 40px;
-      padding: 4px 8px;
-      font: inherit;
-      color: inherit;
-      background: var(--card-background-color, #fff);
-      border: 1px solid var(--divider-color, #e0e0e0);
-      border-radius: 8px;
-    }
-    select:focus-visible { outline: 2px solid var(--primary-color, #03a9f4); outline-offset: 1px; }
     .rooms { display: grid; gap: 16px; grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr)); }
     .room { display: flex; flex-direction: column; gap: 12px; padding: 16px; min-width: 0; }
     .room.problem { border-color: var(--error-color, #db4437); }
@@ -123,15 +97,6 @@
     .learned { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
     .learned b { display: block; font-size: 15px; font-weight: 500; font-variant-numeric: tabular-nums; }
     .learned span { display: block; font-size: 11px; color: var(--secondary-text-color, #666); }
-    .learned button { flex: none; min-height: 40px; padding: 4px 12px; font-size: 13px; }
-    .modes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
-    .modes button { min-height: 40px; padding: 4px; font-size: 13px; }
-    .modes button.selected {
-      background: var(--primary-color, #03a9f4);
-      border-color: var(--primary-color, #03a9f4);
-      color: var(--text-primary-color, #fff);
-    }
-    button.confirm { border-color: var(--warning-color, #d9650a); color: var(--warning-color, #d9650a); font-weight: 500; }
     .note { margin: 0; font-size: 12px; color: var(--secondary-text-color, #666); }
     .problems { margin: 0; padding: 8px 12px; font-size: 13px; border-radius: 8px; color: var(--error-color, #db4437); border: 1px solid currentColor; }
     .foot { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 12px; font-size: 12px; color: var(--secondary-text-color, #666); }
@@ -148,16 +113,11 @@
       super();
       this.attachShadow({ mode: "open" });
       this._signature = null;
-      this._pending = null;
-      this._settings = null;
-      this._settingsAsked = false;
       this.shadowRoot.addEventListener("click", (event) => this._onClick(event));
-      this.shadowRoot.addEventListener("change", (event) => this._onChange(event));
     }
 
     set hass(hass) {
       this._hass = hass;
-      if (!this._settingsAsked) this._loadSettings();
       this._update();
     }
 
@@ -209,37 +169,12 @@
       return value.toLocaleString(language, { minimumFractionDigits: digits, maximumFractionDigits: digits });
     }
 
-    // The settings shared by all rooms come from the integration itself, not from an entity.
-    _loadSettings() {
-      this._settingsAsked = true;
-      if (!this._hass.callWS) return;
-      this._hass.callWS({ type: `${PLATFORM}/settings` }).then(
-        (settings) => {
-          this._settings = settings;
-          this._update();
-        },
-        () => {
-          this._settingsAsked = false;
-        },
-      );
-    }
-
-    _sensorOptions(deviceClass) {
-      return Object.entries(this._hass.states)
-        .filter(([entityId, state]) => entityId.startsWith("sensor.") && (state.attributes || {}).device_class === deviceClass)
-        .map(([entityId, state]) => [entityId, state.attributes.friendly_name || entityId])
-        .sort((a, b) => a[1].localeCompare(b[1]));
-    }
-
     _update() {
       if (!this._hass) return;
       const rooms = this._rooms();
-      const signature = JSON.stringify([
-        this._pending,
-        this._settings,
-        this._settings ? [this._sensorOptions("temperature"), this._sensorOptions("power")] : null,
+      const signature = JSON.stringify(
         rooms.map((room) => [room.name, room.area, Object.values(room.entities).map((id) => (this._hass.states[id] || {}).last_updated)]),
-      ]);
+      );
       if (signature === this._signature) return;
       this._signature = signature;
       this._render(rooms);
@@ -250,7 +185,7 @@
       this.shadowRoot.innerHTML = `
         <style>${STYLE}</style>
         <header>${menu}<h1>What the Heat</h1>${VERSION ? `<span class="version">${escapeHtml(VERSION)}</span>` : ""}</header>
-        <main>${rooms.length ? this._summary(rooms) + this._sensors() + `<div class="rooms">${rooms.map((room) => this._room(room)).join("")}</div>` : this._empty()}</main>
+        <main>${rooms.length ? this._summary(rooms) + `<div class="rooms">${rooms.map((room) => this._room(room)).join("")}</div>` : this._empty()}</main>
       `;
       const button = this.shadowRoot.querySelector("ha-menu-button");
       if (button) {
@@ -269,37 +204,15 @@
       const active = count((room) => (this._state(room, "mode") || {}).state === "active");
       const problems = count((room) => (this._state(room, "problem") || {}).state === "on");
       const item = (value, label, alert) => `<div class="${alert ? "alert" : ""}"><b>${value}</b><span>${label}</span></div>`;
+      // The water temperature is a shared setting, changed with Configure on the integration.
       const water = this._number(rooms[0], "water_temperature", 1);
-      const control = `
-        <div class="water" role="group" aria-label="Water temperature for all rooms">
-          <button class="step" data-action="water" data-delta="-0.5" aria-label="Lower the water temperature">−</button>
-          <div class="water-value"><b>${water ?? "–"} °C</b><span>Water, all rooms</span></div>
-          <button class="step" data-action="water" data-delta="0.5" aria-label="Raise the water temperature">+</button>
-        </div>`;
-      return `<div class="card summary">${item(rooms.length, "Rooms")}${item(heating, "Heating now")}${item(active, "Controlled")}${item(problems, "Problems", problems > 0)}${control}</div>`;
-    }
-
-    _sensors() {
-      if (!this._settings) return "";
-      const choice = (key, label, deviceClass, note) => {
-        const current = this._settings[key] || "";
-        const options = this._sensorOptions(deviceClass);
-        if (current && !options.some(([id]) => id === current)) options.unshift([current, current]);
-        const items = options.map(([id, name]) => `<option value="${escapeHtml(id)}" ${id === current ? "selected" : ""}>${escapeHtml(name)}</option>`);
-        return `
-          <label>
-            <span>${label}, all rooms</span>
-            <select data-setting="${key}"><option value="" ${current ? "" : "selected"}>None</option>${items.join("")}</select>
-            <small>${note}</small>
-          </label>`;
-      };
-      return `<div class="card sensors">${choice("outdoor_entity", "Outdoor temperature", "temperature", "Only logged for now, for learning later.")}${choice("pv_entity", "PV power", "power", "Tells each room how much sun there is, so that it can learn what the sun does to it.")}</div>`;
+      return `<div class="card summary">${item(rooms.length, "Rooms")}${item(heating, "Heating now")}${item(active, "Controlled")}${item(problems, "Problems", problems > 0)}${item(`${water ?? "–"} °C`, "Water, all rooms")}</div>`;
     }
 
     _room(room) {
       const climate = this._state(room, "zone");
       const attributes = climate ? climate.attributes : {};
-      const mode = (this._state(room, "mode") || {}).state || "observe";
+      const mode = (this._state(room, "mode") || {}).state || "active";
       const problem = this._state(room, "problem");
       const reasons = problem && problem.state === "on" ? problem.attributes.reasons || [] : [];
       const temperature = attributes.current_temperature;
@@ -341,10 +254,9 @@
             ${today("heating_today", "Heating", 0, "%")}
             ${today("longest_closed_today", "Longest off", 1, " h")}
           </div>
-          ${this._learned(room, name)}
+          ${this._learned(room)}
           ${this._sun(room)}
-          <div class="modes" role="group" aria-label="Mode of ${name}">${MODES.map(([value, label]) => this._modeButton(room, mode, value, label)).join("")}</div>
-          <p class="note">${MODE_NOTES[mode] || ""}</p>
+          ${MODE_NOTES[mode] ? `<p class="note">${MODE_NOTES[mode]}</p>` : ""}
           <div class="foot">
             <span>Writes ${this._number(room, "setpoint_writes") ?? "–"} · Resent ${this._number(room, "resends") ?? "–"}</span>
             <a href="/config/devices/device/${encodeURIComponent(room.id)}">Details</a>
@@ -353,18 +265,14 @@
       `;
     }
 
-    _learned(room, name) {
+    _learned(room) {
       const state = this._state(room, "learned_demand");
       if (!state) return "";
       const demand = this._number(room, "learned_demand");
       const { source, learned_from_hours: hours = 0 } = state.attributes;
       const seen = source === "thermostat" ? "Valve opening seen on the thermostat" : "Valve opening this room needs";
       const label = demand === null ? "Nothing learned yet. It takes a few hours near the target." : `${seen}, from ${this._duration(hours)} of data`;
-      const confirming = this._isPending(room, "reset");
-      const reset = room.entities.reset_learning
-        ? `<button class="${confirming ? "confirm" : ""}" data-action="reset" data-room="${room.id}" aria-label="Reset what ${name} has learned">${confirming ? "Confirm?" : "Reset learning"}</button>`
-        : "";
-      return `<div class="learned"><div><b>${demand === null ? "–" : demand + "%"}</b><span>${label}</span></div>${reset}</div>`;
+      return `<div class="learned"><div><b>${demand === null ? "–" : demand + "%"}</b><span>${label}</span></div></div>`;
     }
 
     // Shown only while a PV sensor is set.
@@ -382,41 +290,11 @@
       return hours >= 48 ? `${this._format(hours / 24, 0)} days` : `${this._format(hours, 0)} h`;
     }
 
-    _modeButton(room, mode, value, label) {
-      const selected = mode === value;
-      const confirming = this._isPending(room, value);
-      const classes = [selected ? "selected" : "", confirming ? "confirm" : ""].join(" ");
-      return `<button class="${classes}" data-action="mode" data-room="${room.id}" data-mode="${value}" aria-pressed="${selected}">${confirming ? "Confirm?" : label}</button>`;
-    }
-
     _onClick(event) {
       const button = event.target.closest("button[data-action]");
       if (!button) return;
-      if (button.dataset.action === "water") {
-        this._changeWater(Number(button.dataset.delta));
-        return;
-      }
       const room = this._rooms().find((item) => item.id === button.dataset.room);
-      if (!room) return;
-      if (button.dataset.action === "target") this._changeTarget(room, Number(button.dataset.delta));
-      else if (button.dataset.action === "reset") this._resetLearning(room);
-      else this._changeMode(room, button.dataset.mode);
-    }
-
-    _onChange(event) {
-      const select = event.target.closest("select[data-setting]");
-      if (!select) return;
-      const key = select.dataset.setting;
-      this._settings = { ...this._settings, [key]: select.value || null };
-      Promise.resolve(this._hass.callService(PLATFORM, "set_sensors", { [key]: select.value })).finally(() => this._loadSettings());
-    }
-
-    _changeWater(delta) {
-      const rooms = this._rooms();
-      const state = rooms.length ? this._state(rooms[0], "water_temperature") : undefined;
-      if (!state || UNUSABLE.has(state.state)) return;
-      const next = Math.min(WATER_MAX, Math.max(WATER_MIN, Number(state.state) + delta));
-      this._hass.callService(PLATFORM, "set_water_temperature", { temperature: next });
+      if (room) this._changeTarget(room, Number(button.dataset.delta));
     }
 
     _changeTarget(room, delta) {
@@ -425,42 +303,6 @@
       const { temperature, min_temp: low = 5, max_temp: high = 30 } = climate.attributes;
       const next = Math.min(high, Math.max(low, temperature + delta));
       this._hass.callService("climate", "set_temperature", { entity_id: room.entities.zone, temperature: next });
-    }
-
-    _changeMode(room, mode) {
-      const current = (this._state(room, "mode") || {}).state;
-      if (current === mode) return;
-      // Starting or handing over control writes to the thermostat, so a stray tap must not do it.
-      if (this._confirmed(room, mode, mode === "observe")) {
-        this._hass.callService("select", "select_option", { entity_id: room.entities.mode, option: mode });
-      }
-      this._update();
-    }
-
-    _resetLearning(room) {
-      // What was learned cannot be brought back, so a stray tap must not do it.
-      if (this._confirmed(room, "reset")) {
-        this._hass.callService("button", "press", { entity_id: room.entities.reset_learning });
-      }
-      this._update();
-    }
-
-    _isPending(room, action) {
-      return Boolean(this._pending && this._pending.room === room.id && this._pending.action === action);
-    }
-
-    // Returns whether to go ahead. Otherwise the action now waits for a second tap.
-    _confirmed(room, action, immediately = false) {
-      const confirmed = immediately || this._isPending(room, action);
-      clearTimeout(this._pendingTimer);
-      this._pending = confirmed ? null : { room: room.id, action };
-      if (!confirmed) {
-        this._pendingTimer = setTimeout(() => {
-          this._pending = null;
-          this._update();
-        }, CONFIRM_MS);
-      }
-      return confirmed;
     }
   }
 

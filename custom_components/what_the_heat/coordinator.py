@@ -159,7 +159,7 @@ class ZoneCoordinator(DataUpdateCoordinator[ZoneData]):
         phase_minutes = self._config.get(CONF_PHASE_OFFSET, DEFAULT_PHASE_OFFSET)
         self.runner = ZoneRunner(
             RunnerConfig(zone=ZoneConfig(target=target, phase_offset_s=phase_minutes * 60.0)),
-            Mode(state.get("mode", Mode.OBSERVE.value)),
+            Mode(state.get("mode", Mode.ACTIVE.value)),
             integral=state.get("integral", 0.0),
             carry_s=state.get("carry_s", 0.0),
             start_s=now_s,

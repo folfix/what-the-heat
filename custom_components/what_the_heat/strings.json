@@ -1,15 +1,30 @@
 {
   "config": {
     "abort": {
-      "already_configured": "This thermostat already belongs to a room."
+      "already_configured": "This thermostat already belongs to a room.",
+      "settings_exist": "The shared settings already exist. Change them with Configure on their entry."
     },
     "error": {
       "own_entity": "Select the real thermostat, not an entity created by this integration."
     },
     "step": {
+      "settings": {
+        "title": "Shared settings",
+        "description": "These settings are shared by all rooms and rarely change. Change them later with Configure on this entry. Add each room afterwards with Add entry.",
+        "data": {
+          "water_temperature": "Water temperature",
+          "outdoor_entity": "Outdoor temperature sensor",
+          "pv_entity": "PV power sensor"
+        },
+        "data_description": {
+          "water_temperature": "The temperature set on the mixing valves. It only tells the controller what the water temperature is, and changes nothing on the heat source.",
+          "outdoor_entity": "Only logged for now, for learning later.",
+          "pv_entity": "The current power of a PV installation, preferably read locally. It tells each room how much sun there is, so that the room can learn what the sun does to it."
+        }
+      },
       "user": {
         "title": "Add a room",
-        "description": "A new room starts in observe mode: it calculates and logs, and writes nothing to the thermostat until you select active mode. The water temperature and the outdoor and PV sensors are shared by all rooms and are set on the What the Heat page.",
+        "description": "A new room starts in active mode and controls the thermostat right away. Its Mode entity switches it to observe mode, which only calculates, or hands the thermostat back.",
         "data": {
           "name": "Room name",
           "thermostat": "Thermostat",
@@ -32,31 +47,19 @@
         "data_description": {
           "phase_offset": "Set different values for different rooms, so that they do not all open together."
         }
-      }
-    }
-  },
-  "services": {
-    "set_water_temperature": {
-      "name": "Set water temperature",
-      "description": "Sets the temperature of the water going into the floors, for all rooms. It only tells the controller what the water temperature is, and changes nothing on the heat source.",
-      "fields": {
-        "temperature": {
-          "name": "Temperature",
-          "description": "The temperature set on the mixing valves."
-        }
-      }
-    },
-    "set_sensors": {
-      "name": "Set sensors",
-      "description": "Sets the outdoor temperature and PV power sensors shared by all rooms. A sensor left out stays as it is, and an empty one is removed.",
-      "fields": {
-        "outdoor_entity": {
-          "name": "Outdoor temperature sensor",
-          "description": "Only logged for now, for learning later."
+      },
+      "settings": {
+        "title": "Shared settings",
+        "description": "These settings are shared by all rooms. A sensor left empty is removed.",
+        "data": {
+          "water_temperature": "Water temperature",
+          "outdoor_entity": "Outdoor temperature sensor",
+          "pv_entity": "PV power sensor"
         },
-        "pv_entity": {
-          "name": "PV power sensor",
-          "description": "The current power of the PV installation. It tells each room how much sun there is, so that the room can learn what the sun does to it."
+        "data_description": {
+          "water_temperature": "The temperature set on the mixing valves. It only tells the controller what the water temperature is, and changes nothing on the heat source.",
+          "outdoor_entity": "Only logged for now, for learning later.",
+          "pv_entity": "The current power of a PV installation, preferably read locally. It tells each room how much sun there is, so that the room can learn what the sun does to it."
         }
       }
     }
