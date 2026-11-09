@@ -51,16 +51,18 @@ If a room stays at 100% and below its target, the water cannot deliver enough he
 
 These are the Shared settings. Neither is required.
 
-- **Outdoor temperature:** only logged for now, for learning later.
+- **Outdoor temperature:** preferably in the shade. It drives the weather correction described below.
 - **PV power:** the current power of a PV installation, in W or kW. It is the sun signal described below. Use one read locally, since a cloud service may stop for hours.
 
 ### What a room learns so far
 
 **Steady demand:** how much of the time the valve must be open to hold the target. The controller works this out while it is in charge. Before that, the integration watches how much the thermostat heats on its own. The value appears after about 6 hours of data near the target, as the **Learned demand** sensor and on the **What the Heat** page.
 
-**The sun:** with a PV sensor set, each room in Active mode learns, for every hour of the day, how much less heat it needs while the sun shines. If the room was above its target 2 hours after a sunny hour, that hour asks for less heat the next time the sun shines, and the other way round. After 3 sunny days it starts acting: while the panels see the sun, the valve opens less, in proportion to the PV power compared with the highest seen lately. The panels often see the sun well before the room shows it, so heating that the sun would make unnecessary is left out in advance. It never makes the valve open more. The **Sun correction** sensor shows how much it takes off the valve opening now. In simulated sunny rooms this cut the time above the band by about 30%, at the cost of slightly cooler mornings. It has not yet been measured in a real room.
+**The sun:** with a PV sensor set, each room in Active mode learns, for every hour of the day in solar time, how much less heat it needs while the sun shines. Solar time follows the sun rather than the clock, so the profile does not shift when the clocks change. If the room was above its target 2 hours after a sunny hour, that hour asks for less heat the next time the sun shines, and the other way round. After 3 sunny days it starts acting: while the panels see the sun, the valve opens less, in proportion to the PV power compared with the highest seen lately. The panels often see the sun well before the room shows it, so heating that the sun would make unnecessary is left out in advance. It never makes the valve open more. The **Sun correction** sensor shows how much it takes off the valve opening now. In simulated sunny rooms this cut the time above the band by about 30%, at the cost of slightly cooler mornings. It has not yet been measured in a real room.
 
-The **Reset learning** button on a room's device page clears both when something unusual has misled the controller. The mode, the target and the daily measurements stay. The room needs time to learn again, so expect a temporary dip while the valve stays closed for longer. In simulated rooms the lowest temperature fell by 0.5 to 1.5 °C in most cases, and the room spent up to about half a day outside ±0.3 °C, or about 2.5 days in the slowest case.
+**The weather:** with an outdoor sensor set, each room adds heat when it is colder outside than usual, and takes some away when it is warmer. The usual temperature is the average over about the last day, which the steady demand already covers, so the correction only follows the swings around it: the night, the afternoon, a front. Each room learns how strongly it feels them from its own deviations, only while the sun does not shine, and a basement room learns that it hardly does. The correction starts after a day of readings, and stops if the sensor is silent for 2 hours. The **Outdoor correction** sensor shows it now. In simulated rooms without sun it cut the typical deviation by about a fifth. It has not yet been measured in a real room.
+
+The **Reset learning** button on a room's device page clears all three when something unusual has misled the controller. The mode, the target and the daily measurements stay. The room needs time to learn again, so expect a temporary dip while the valve stays closed for longer. In simulated rooms the lowest temperature fell by 0.5 to 1.5 °C in most cases, and the room spent up to about half a day outside ±0.3 °C, or about 2.5 days in the slowest case.
 
 ### Not there yet
 
@@ -94,6 +96,10 @@ python -m tests.simulation.pilot
 
 ```bash
 python -m tests.simulation.sun
+```
+
+```bash
+python -m tests.simulation.outdoor
 ```
 
 The integration tests run against a real Home Assistant core and need Python 3.14 and the packages in `requirements_test.txt`:

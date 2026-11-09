@@ -176,7 +176,7 @@ Worked example with `k1 = 0.27`, `k3 = 0.94`, target 21 °C, 3 °C outdoors: `L 
 |---|---|---|
 | L0 Valve | Opens and closes the loop through the setpoint, with a watchdog | writes on change, checks every 5 min |
 | L1 Zone | PID, duty calculation, cycle scheduling across zones | 60 s |
-| L2 Prediction | Solar feed-forward from PV, and outdoor feed-forward from the forecast (planned) | 60 s for PV, 30 min for the forecast |
+| L2 Prediction | Solar feed-forward from PV, the outdoor correction from the local sensor, and feed-forward from the forecast (planned) | 60 s, 30 min for the forecast |
 | Learning | Refits per-room parameters, such as the solar profile | nightly |
 
 ### 6.3 L0: valve
@@ -203,7 +203,8 @@ Worked example with `k1 = 0.27`, `k3 = 0.94`, target 21 °C, 3 °C outdoors: `L 
 
 ### 6.5 L2: prediction
 
-- Outdoor temperature comes from the local sensor. The forecast contributes only its change: `T_out(+2 h) = sensor(now) + forecast(+2 h) - forecast(now)`. The forecast and the sensor differ (6.8 °C against 4.2 °C on one observed day), and a constant ±2.6 K error did not change the simulated result.
+- Implemented: a learned outdoor correction. Each room adds `weight * (usual - now)` to the controller output, in the same percent as the integral, where `usual` is the outdoor temperature averaged over about a day and `now` is the reading smoothed over 15 minutes. The integral keeps the demand at the usual temperature, and the correction follows the swings around it: the night, the afternoon, a front. The weight learns while the room is active and the integral could move, but only while the share of full sun is below 10%, because the sun warms the air outside and the room at the same time. It moves by `0.01 * error * (usual - now)` per hour and stays between 0 and 5, so colder weather never means less heat, and a basement room that hardly feels the weather learns a small weight. The correction acts after a day of readings, and stops after 2 hours without one.
+- Outdoor temperature comes from the local sensor. A forecast would contribute only its change: `T_out(+2 h) = sensor(now) + forecast(+2 h) - forecast(now)`. This is planned. The forecast and the sensor differ (6.8 °C against 4.2 °C on one observed day), and a constant ±2.6 K error did not change the simulated result.
 - The solar signal is the power of a PV installation read locally, as a share of full sun. Full sun is the highest power seen, fading with a 30 day half-life, so that the lower sun of another season reaches full sun again. PV shows the sun as it shines, often before the room does: in the pilot house in November the panels saw the sun from about 07:30, and the main room's reading jumped at about 09:20. When the sun reaches the panels and each room's windows is learned per room, hour by hour (6.7). Snow on the panels reads as no sun, so the room then runs as it would without PV.
 - The hourly cloud forecast through the Kasten-Czeplak attenuation would warn earlier, before sunrise. It is planned, with scaling by clear-sky irradiance for seasonal change, and not yet implemented.
 
@@ -228,7 +229,7 @@ duty = L / (T_water - T_room - k3 * L)
 
 New values are blended in (85% old, 15% new). No deliberate cooling of rooms is needed, so step tests are optional.
 
-**Solar profile: 24 values, implemented with PV.** After each day, each hourly value moves by `rate * gain * share * deviation`: the mean share of full sun in that hour, times the room's mean deviation from its target 2 hours later, with a rate of 0.25 and a gain of 80 %/K like the proportional gain. The profile is then smoothed, each hour taking 0.2 of each neighbour, and kept between 0 and 100, in the controller's percent like the integral. It learns only in active mode. Once it has learned from 3 sunny days, meaning days with at least 2 hours' worth of full sun, it subtracts `value[hour] * share now` from the controller output, so that the valve opens less while the sun shines, and never more. Window orientation does not have to be configured. In an earlier simulation that weighted the deviation by the forecast clearness instead of PV, the peak correction emerged by itself: 8:00 for an east room, 10:00 for a south room, 13:00 for a west room.
+**Solar profile: 24 values, implemented with PV.** After each day, each hourly value moves by `rate * gain * share * deviation`: the mean share of full sun in that hour, times the room's mean deviation from its target 2 hours later, with a rate of 0.25 and a gain of 80 %/K like the proportional gain. The profile is then smoothed, each hour taking 0.2 of each neighbour, and kept between 0 and 100, in the controller's percent like the integral. It learns only in active mode. Once it has learned from 3 sunny days, meaning days with at least 2 hours' worth of full sun, it subtracts `value[hour] * share now` from the controller output, so that the valve opens less while the sun shines, and never more. The hours are solar time, from UTC and the longitude set in Home Assistant, so the profile stays with the sun when the clocks change, and the solar day starts at solar midnight. Each value stands for the middle of its hour, and the moments in between take from both neighbours, so the correction does not jump at the full hour. Window orientation does not have to be configured. In an earlier simulation that weighted the deviation by the forecast clearness instead of PV, the peak correction emerged by itself: 8:00 for an east room, 10:00 for a south room, 13:00 for a west room.
 
 **Recurring gains: 24 values.** The same rule, weighted towards cloudy days, with the mean removed and values limited. This captures things like cooking.
 
@@ -242,7 +243,7 @@ New values are blended in (85% old, 15% new). No deliberate cooling of rooms is 
 | Integration unloaded or crashed | Thermostats get the plain target as setpoint and regulate on their own (hand-back). Heartbeat entity for monitoring. |
 | Thermostat unavailable | Zone reports unavailable instead of a false "off", and integration pauses. Other zones are unaffected. |
 | Room temperature stale | After 30 min the last duty is held. After 60 min the zone is handed back to the thermostat. |
-| Outdoor sensor lost | AccuWeather with the last known offset, alert after 2 h. |
+| Outdoor sensor lost | The outdoor correction stops after 2 h without a reading, and the room runs on the integral alone. A fallback to AccuWeather with the last known offset is planned. |
 | Forecast lost | Current outdoor temperature is used, and solar feed-forward is disabled. |
 | Model not trusted | PID only. |
 
@@ -250,11 +251,11 @@ Valve exercise: any loop idle for 7 days is opened for 15 minutes. The 15 second
 
 ### 6.9 Integration and repository
 
-Each room is one configuration entry. The outdoor and PV sensors are shared by all rooms and rarely change, so they are kept in one more entry, **Shared settings**, which the first setup of the integration asks for and Configure changes later. Without it the rooms use no sensors. Its title starts with a gear, so that it sorts above the rooms. The water temperature is shared too, but may change over time, so it is set on the sidebar page (6.6). The integration exposes the target, duty, PID terms, sun correction, valve state, status and daily comfort metrics as entities, plus a diagnostics download with one row per day. Each room also has a thermostat entity for dashboards, with the modes as presets. A sidebar page shows all rooms as tiles, using plain JavaScript with no build step. It changes the targets and the water temperature, and nothing else. Each zone has a mode: `active` (the default for a new room), `observe` (calculates and logs only), or `handback`, set with its Mode entity.
+Each room is one configuration entry. The outdoor and PV sensors are shared by all rooms and rarely change, so they are kept in one more entry, **Shared settings**, which the first setup of the integration asks for and Configure changes later. Without it the rooms use no sensors. Its title starts with a gear, so that it sorts above the rooms. The water temperature is shared too, but may change over time, so it is set on the sidebar page (6.6). The integration exposes the target, duty, PID terms, sun and outdoor corrections, valve state, status and daily comfort metrics as entities, plus a diagnostics download with one row per day. Each room also has a thermostat entity for dashboards, with the modes as presets. A sidebar page shows all rooms as tiles, using plain JavaScript with no build step. It changes the targets and the water temperature, and nothing else. Each zone has a mode: `active` (the default for a new room), `observe` (calculates and logs only), or `handback`, set with its Mode entity.
 
 On switching from `observe` to `active`, the integral starts from how much the thermostat has recently been heating, but only if the room is near its target. Otherwise it starts from zero.
 
-Until the learning of 6.7 exists, what a room has learned is its steady demand. The `Learned demand` sensor and the sidebar page show it as the valve opening needed at the current water temperature, once at least 6 hours of data are behind it. While `active` it comes from the integral, and only time when the integral could move counts as data, so a cold room warming at full duty learns nothing. Otherwise it comes from the heating share of the thermostat, if the room is near its target. A `Reset learning` button on the device page clears the integral, the carried on-time, the heating share, the solar profile and the data counters. It keeps the mode, the target, the counters of writes and the daily rows, which are measurements and not learned. In simulation a reset of a settled room at 34 °C or 38 °C water lowered the minimum by 0.4 to 1.6 °C, and cost 3 to 15 extra hours outside ±0.3 °C in most rooms. The worst cases were a room with high losses at 34 °C with 31 hours, and a room with heavy air at 30 °C with 60 hours.
+Until the learning of 6.7 exists, what a room has learned is its steady demand. The `Learned demand` sensor and the sidebar page show it as the valve opening needed at the current water temperature, once at least 6 hours of data are behind it. While `active` it comes from the integral, and only time when the integral could move counts as data, so a cold room warming at full duty learns nothing. Otherwise it comes from the heating share of the thermostat, if the room is near its target. A `Reset learning` button on the device page clears the integral, the carried on-time, the heating share, the solar profile, the outdoor weight and the data counters. It keeps the mode, the target, the counters of writes and the daily rows, which are measurements and not learned. In simulation a reset of a settled room at 34 °C or 38 °C water lowered the minimum by 0.4 to 1.6 °C, and cost 3 to 15 extra hours outside ±0.3 °C in most rooms. The worst cases were a room with high losses at 34 °C with 31 hours, and a room with heavy air at 30 °C with 60 hours.
 
 ```
 custom_components/what_the_heat/
@@ -290,6 +291,8 @@ docs/
 | Full sun | Highest PV power seen, half-life 30 days | this project |
 | Solar profile | Rate 0.25 and gain 80 %/K per day, deviation lag 2 h, smoothing 0.2, values 0-100 | simulation (8.9), lag as seen in the pilot house |
 | Solar profile acts after | 3 sunny days, each with at least 2 hours' worth of full sun | this project |
+| Solar profile hours | Solar time from the longitude, values at the middle of each hour, interpolated | this project |
+| Outdoor correction | Usual temperature over 24 h, reading smoothed 15 min, rate 0.01 per K² and hour, weight 0-5 %/K, learns below 10% sun, acts after a day, stops after 2 h without readings | simulation (8.10) |
 | Gains learning rate | 1 per day, deviation lag 2 h | simulation |
 | Model trust threshold | daily balance error under about 5 points | proposal, unverified |
 | Watchdog | every 5 min, alert after 3 mismatches | hass-ufh-controller, this project |
@@ -424,19 +427,33 @@ Run it with `python -m tests.simulation.sun`. Five room types (reference, low lo
 
 | | Plain thermostat | Controller without PV | Controller with the solar profile |
 |---|---|---|---|
-| Within ±0.3 °C | 44% | 57% | 66% |
-| RMS deviation | 0.83 °C | 0.93 °C | 0.73 °C |
-| Highest | 23.14 °C | 23.33 °C | 22.96 °C |
+| Within ±0.3 °C | 44% | 57% | 65% |
+| RMS deviation | 0.83 °C | 0.93 °C | 0.74 °C |
+| Highest | 23.14 °C | 23.33 °C | 22.98 °C |
 | Lowest | 20.46 °C | 20.64 °C | 20.65 °C |
 | Above the band | 7.3 K·h a day | 9.1 K·h a day | 6.5 K·h a day |
-| Below the band | 1.6 K·h a day | 1.2 K·h a day | 1.0 K·h a day |
+| Below the band | 1.6 K·h a day | 1.2 K·h a day | 0.9 K·h a day |
 
 - Without PV the controller overheats sunny rooms more than the plain thermostat, which lets the floor cool further between its long cycles.
 - With full sun every day, the profile closes the valve earlier in the morning. The lowest temperature then fell by up to 0.2 °C, with almost no time below the band.
-- In rooms the sun does not reach while the panels see it, the profile changed nothing worth noting: RMS 0.131 against 0.143 °C.
+- In rooms the sun does not reach while the panels see it, the profile changed nothing worth noting: RMS 0.130 against 0.143 °C.
 - Not lowering the integral while the sun had recently shone, so that a sun-warmed room would not lower its steady demand, made no difference (RMS 0.740 against 0.732 °C) and was left out.
-- A rate of 0.5 or a lag of 3 hours did slightly better than the chosen 0.25 and 2 hours, at an RMS of 0.71-0.72 against 0.73 °C, and a rate of 0.1 or a lag of 1 hour slightly worse, at 0.76-0.78 °C. Without smoothing, or with values limited to 50, the RMS was 0.76-0.78 °C. The settings stay on the cautious side and on the lag seen in the pilot house.
+- Before the hours were interpolated, a rate of 0.5 or a lag of 3 hours did slightly better than the chosen 0.25 and 2 hours, at an RMS of 0.71-0.72 against 0.73 °C, and a rate of 0.1 or a lag of 1 hour slightly worse, at 0.76-0.78 °C. Without smoothing, or with values limited to 50, the RMS was 0.76-0.78 °C. The settings stay on the cautious side and on the lag seen in the pilot house.
 - The model does not include sun falling on the thermostat itself, which the pilot house showed.
+
+### 8.10 Outdoor correction
+
+Run it with `python -m tests.simulation.outdoor`. All seven room types of 8.6 at a 21 °C target, water at 34 or 38 °C, outdoor mean 0 °C with a daily swing of ±5 K, shaped on the pilot house in November. Each run lasts 4 weeks, of which the last 2 are measured. "Fronts" repeat a week whose daily mean moves between -6 and +3 K. In the model only the air loses heat to the outdoor air, and the walls to the ground. Means over the 14 cases:
+
+| Scenario | Without the correction | With it |
+|---|---|---|
+| Fronts, no sun | 91.3% within ±0.3 °C, RMS 0.169 °C | 94.2%, 0.138 °C |
+| Steady weather, no sun | 95.0%, 0.130 °C | 96.1%, 0.103 °C |
+| Fronts, sun up to 1000 W, with the solar profile | 70.3%, 0.522 °C | 72.3%, 0.514 °C |
+
+- The largest gain was a room with high losses at 38 °C water under fronts, from 80% to 93% within the band.
+- In sunny weather the sun dominates, and the correction changes little.
+- Smoothing the reading over 15 minutes did slightly better than over 1 or 3 hours, a rate of 0.03 about the same as 0.01, 0.003 slightly worse, and a usual temperature over 12 or 48 hours about the same as 24.
 
 ---
 
@@ -488,6 +505,7 @@ All based on what can be measured: air temperature and valve state.
 | The water is too cold for a room in cold weather | The room stays fully open and below target. Raise the temperature by hand, on the valves and in the setting. See 8.7. |
 | The global setting differs from the real water temperature, or the buffer falls below the mixing setpoint | The integral compensates a steady difference. See 8.6 for the tolerance. |
 | Learning degrades a room | Bounds, trust threshold, fallback to PID, per-room switch |
+| The outdoor sensor reads the sun, or fails | Placed in the shade. The weight learns only without sun, the correction stops after 2 h without readings, and the integral covers the rest. |
 | PV misreads the sun on a room's windows: snow on the panels, or panels facing elsewhere | Snow reads as no sun, so the room runs as without PV. The solar profile only lowers heating, is bounded, and learns back when the room ends up below its target. |
 | Frequent setpoint writes wear out a thermostat | About 96 writes a day per room with the 30 minute window. Whether the device stores each one in flash memory, and how long that lasts, is unknown. If it matters, lengthen the window. |
 | Integration bug affects Home Assistant, since it runs in-process | Async only, no blocking work, core tested separately |
@@ -524,6 +542,8 @@ All based on what can be measured: air temperature and valve state.
 | PV power, read locally, as the sun signal | It shows the sun as it shines, often hours before a room does, without a cloud service |
 | Outdoor and PV sensors shared by all rooms, in a Shared settings entry, and the water temperature on the sidebar page | One house has one outdoor sensor and one PV installation. Owner decision: settings that rarely change belong in the integration's configuration, and the water temperature, which may change over time, on the page. |
 | A new room starts in active mode, and the sidebar page has no mode or reset buttons | Owner decision. The modes stay available through each room's Mode entity. |
+| The solar profile in solar time | Owner decision: it must not shift when the clocks change. |
+| An outdoor correction learned per room, only without sun | It anticipates the night and fronts that the integral would follow late, and a basement room learns that it hardly feels the weather. Learning in the sun would mix the weather up with the sun. |
 | First real test on one closed basement room at 21 °C, PID and cycles only | Least outside influence, smallest risk |
 | English only in the repository; work goes straight to the default branch | Owner decision |
 

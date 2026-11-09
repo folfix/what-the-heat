@@ -268,6 +268,7 @@
           </div>
           ${this._learned(room)}
           ${this._sun(room)}
+          ${this._outdoor(room)}
           ${MODE_NOTES[mode] ? `<p class="note">${MODE_NOTES[mode]}</p>` : ""}
           <div class="foot">
             <span>Writes ${this._number(room, "setpoint_writes") ?? "–"} · Resent ${this._number(room, "resends") ?? "–"}</span>
@@ -296,6 +297,18 @@
       const sunnyDays = `${days} sunny ${days === 1 ? "day" : "days"}`;
       const label = active ? `Valve opening the sun takes off now, learned from ${sunnyDays}` : `Learning what the sun does here, from ${sunnyDays} so far`;
       return `<div class="learned"><div><b>${active && correction !== null ? correction + "%" : "–"}</b><span>${label}</span></div></div>`;
+    }
+
+    // Shown only while an outdoor sensor is set.
+    _outdoor(room) {
+      const state = this._state(room, "outdoor_correction");
+      if (!state || UNUSABLE.has(state.state)) return "";
+      const colder = state.attributes.colder_than_usual;
+      if (colder == null) return `<div class="learned"><div><b>–</b><span>Learning the usual outdoor temperature, which takes a day</span></div></div>`;
+      const correction = this._number(room, "outdoor_correction");
+      const sign = Number(state.state) > 0 ? "+" : "";
+      const how = colder >= 0 ? `${this._format(colder, 1)} K colder` : `${this._format(-colder, 1)} K warmer`;
+      return `<div class="learned"><div><b>${correction === null ? "–" : sign + correction + "%"}</b><span>Valve opening for the weather, ${how} than usual outside</span></div></div>`;
     }
 
     _duration(hours) {

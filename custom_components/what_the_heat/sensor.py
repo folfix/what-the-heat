@@ -55,6 +55,14 @@ def _sun_attributes(data: ZoneData) -> dict[str, Any]:
     }
 
 
+def _outdoor_attributes(data: ZoneData) -> dict[str, Any]:
+    colder = data.colder_than_usual
+    return {
+        "colder_than_usual": None if colder is None else round(colder, 1),
+        "weight": round(data.learned.outdoor_weight, 3),
+    }
+
+
 SENSORS = (
     ZoneSensorDescription(
         key="status",
@@ -125,6 +133,14 @@ SENSORS = (
         suggested_display_precision=0,
         value=lambda data: None if data.sun is None else data.step.decision.sun,
         attributes=_sun_attributes,
+    ),
+    ZoneSensorDescription(
+        key="outdoor_correction",
+        native_unit_of_measurement=PERCENTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=0,
+        value=lambda data: None if data.outdoor is None else data.step.decision.outdoor,
+        attributes=_outdoor_attributes,
     ),
     ZoneSensorDescription(
         key="integral",

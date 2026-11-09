@@ -50,6 +50,7 @@ class ZoneDecision:
     integral: float
     learning: bool = False
     sun: float = 0.0  # change of the duty caused by the sun, in percent, never positive
+    outdoor: float = 0.0  # change of the duty caused by the outdoor temperature, in percent
 
 
 class ZoneController:
@@ -78,6 +79,7 @@ class ZoneController:
         self._last_reading_s: float | None = None
         self._duty = 0.0
         self._sun = 0.0
+        self._outdoor = 0.0
 
     @property
     def target(self) -> float:
@@ -133,11 +135,13 @@ class ZoneController:
         now_s: float,
         room_temperature: float | None,
         water_temperature: float | None = None,
-        feedforward: float = 0.0,
+        sun: float = 0.0,
+        outdoor: float = 0.0,
     ) -> ZoneDecision:
         """Advance the controller and return its decision.
 
-        A negative feedforward stands for heat the room gets from elsewhere, such as the sun.
+        `sun` and `outdoor` are learned changes of the controller output, in the same
+        percent as the integral: less heat for the sun, and more or less for the weather.
         """
         config = self._config
         dt_s = 0.0 if self._last_step_s is None else now_s - self._last_step_s
@@ -154,11 +158,17 @@ class ZoneController:
         output = self._pid.update(
             error,
             min(dt_s, config.max_integration_step_s) if in_control else 0.0,
-            feedforward,
+            sun + outdoor,
             scale,
         )
+
+        def duty(power: float) -> float:
+            return min(100.0, max(0.0, power * scale))
+
+        steady = output.proportional + output.integral
         self._duty = output.duty
-        self._sun = output.duty - min(100.0, max(0.0, (output.proportional + output.integral) * scale))
+        self._sun = output.duty - duty(steady + outdoor)
+        self._outdoor = duty(steady + outdoor) - duty(steady)
         return replace(self._drive(now_s, ZoneStatus.NORMAL), learning=output.integrating)
 
     def _without_reading(self, now_s: float) -> ZoneDecision:
@@ -174,7 +184,9 @@ class ZoneController:
     def _drive(self, now_s: float, status: ZoneStatus) -> ZoneDecision:
         is_open = self._cycle.step(now_s, self._duty)
         setpoint = open_setpoint(self._target, self._valve) if is_open else closed_setpoint(self._target, self._valve)
-        return ZoneDecision(status, setpoint, is_open, self._duty, self._filter.value, self._pid.integral, sun=self._sun)
+        return ZoneDecision(
+            status, setpoint, is_open, self._duty, self._filter.value, self._pid.integral, sun=self._sun, outdoor=self._outdoor
+        )
 
     def _handback(self, status: ZoneStatus) -> ZoneDecision:
         return ZoneDecision(status, self._target, False, self._duty, self._filter.value, self._pid.integral)

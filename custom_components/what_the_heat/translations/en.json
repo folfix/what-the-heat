@@ -16,7 +16,7 @@
           "pv_entity": "PV power sensor"
         },
         "data_description": {
-          "outdoor_entity": "Only logged for now, for learning later.",
+          "outdoor_entity": "Preferably in the shade. Each room learns how much more heat it needs when it is colder outside than usual.",
           "pv_entity": "The current power of a PV installation, preferably read locally. It tells each room how much sun there is, so that the room can learn what the sun does to it."
         }
       },
@@ -54,7 +54,7 @@
           "pv_entity": "PV power sensor"
         },
         "data_description": {
-          "outdoor_entity": "Only logged for now, for learning later.",
+          "outdoor_entity": "Preferably in the shade. Each room learns how much more heat it needs when it is colder outside than usual.",
           "pv_entity": "The current power of a PV installation, preferably read locally. It tells each room how much sun there is, so that the room can learn what the sun does to it."
         }
       }
@@ -125,6 +125,7 @@
       "longest_closed_today": { "name": "Longest closed today" },
       "learned_demand": { "name": "Learned demand" },
       "sun_correction": { "name": "Sun correction" },
+      "outdoor_correction": { "name": "Outdoor correction" },
       "integral": { "name": "Integral" },
       "water_temperature": { "name": "Water temperature" },
       "setpoint_writes": { "name": "Setpoint writes" },

@@ -187,8 +187,8 @@ class ModeChangeTest(unittest.TestCase):
 
     def test_state_survives_a_restart(self) -> None:
         zone = runner(Mode.ACTIVE, integral=33.0, writes=5, learned_s=7200.0, solar={"values": [5.0] * 24, "sunny_days": 4})
-        zone.step(0.0, reading(temperature=TARGET), sun=0.5, date="2026-11-09", hour=10)
-        zone.step(MINUTE, reading(temperature=TARGET), sun=0.5, date="2026-11-09", hour=10)
+        zone.step(0.0, reading(temperature=TARGET), sun=0.5, date="2026-11-09", hour=10, outdoor=-2.0)
+        zone.step(MINUTE, reading(temperature=TARGET), sun=0.5, date="2026-11-09", hour=10, outdoor=-2.5)
         state = zone.snapshot()
         restored = ZoneRunner(
             RunnerConfig(zone=ZoneConfig(target=state["target"])),
@@ -200,6 +200,7 @@ class ModeChangeTest(unittest.TestCase):
             writes=state["writes"],
             learned_s=state["learned_s"],
             solar=state["solar"],
+            outdoor=state["outdoor"],
         )
         self.assertEqual(restored.snapshot(), state)
 
@@ -392,6 +393,31 @@ class SunTest(unittest.TestCase):
         for minute in range(120):
             step = zone.step(minute * MINUTE, reading(temperature=19.0, setpoint=15.0), 34.0, sun=1.0, date="1", hour=10)
             self.assertEqual(step.commands, ())
+
+    def test_colder_weather_than_usual_opens_the_valve_more(self) -> None:
+        def decision(outdoor: float):
+            learned = {"weight": 2.0, "usual": 0.0, "smoothed": outdoor, "history_s": 24 * HOUR}
+            zone = runner(Mode.ACTIVE, integral=30.0, outdoor=learned)
+            return zone.step(0.0, reading(temperature=TARGET), 34.0, outdoor=outdoor).decision
+
+        usual, colder = decision(0.0), decision(-5.0)
+        self.assertEqual(usual.outdoor, 0.0)
+        self.assertGreater(colder.duty, usual.duty)
+        self.assertAlmostEqual(colder.outdoor, colder.duty - usual.duty)
+
+    def test_the_outdoor_weight_is_learned_only_while_active(self) -> None:
+        for mode, learns in ((Mode.ACTIVE, True), (Mode.OBSERVE, False)):
+            with self.subTest(mode=mode):
+                zone = runner(mode, integral=30.0, outdoor={"weight": 1.0, "usual": 0.0, "smoothed": 0.0, "history_s": 24 * HOUR})
+                for minute in range(6 * 60):
+                    zone.step(minute * MINUTE, reading(temperature=TARGET - 0.2, setpoint=TARGET), 34.0, outdoor=-6.0)
+                weight = zone.learned().outdoor_weight
+                self.assertEqual(weight > 1.0, learns)
+
+    def test_reset_forgets_the_outdoor_weight(self) -> None:
+        zone = runner(Mode.ACTIVE, outdoor={"weight": 2.0})
+        zone.reset_learning()
+        self.assertEqual(zone.learned().outdoor_weight, 0.0)
 
     def test_reset_forgets_the_sun(self) -> None:
         zone = runner(Mode.ACTIVE, solar=SUN_LEARNED)

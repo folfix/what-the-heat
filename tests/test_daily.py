@@ -49,11 +49,12 @@ class DailyLogTest(unittest.TestCase):
 
     def test_pv_energy_and_the_sun_correction(self) -> None:
         log = DailyLog()
-        log.add("2026-11-08", HOUR, target=23.0, pv_w=6000.0, sun=-40.0)
-        log.add("2026-11-08", HOUR, target=23.0, pv_w=0.0, sun=0.0)
+        log.add("2026-11-08", HOUR, target=23.0, pv_w=6000.0, sun_correction=-40.0, outdoor_correction=-4.0)
+        log.add("2026-11-08", HOUR, target=23.0, pv_w=0.0, sun_correction=0.0, outdoor_correction=8.0)
         today = log.today
         self.assertEqual(today["pv_kwh"], 6.0)
         self.assertEqual(today["sun_correction_pct"], -20.0)
+        self.assertEqual(today["outdoor_correction_pct"], 2.0)
 
     def test_without_pv_there_is_no_energy(self) -> None:
         log = DailyLog()

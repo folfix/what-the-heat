@@ -33,6 +33,8 @@ class _Day:
     pv_wh: float = 0.0
     sun_s: float = 0.0
     sun_sum: float = 0.0
+    outdoor_correction_s: float = 0.0
+    outdoor_correction_sum: float = 0.0
     writes: int = 0
 
     def row(self) -> dict[str, float | int | str | None]:
@@ -58,6 +60,7 @@ class _Day:
             "water_mean": mean(self.water_sum, self.water_s),
             "pv_kwh": round(self.pv_wh / 1000.0, 2) if self.pv_s > 0 else None,
             "sun_correction_pct": mean(self.sun_sum, self.sun_s),
+            "outdoor_correction_pct": mean(self.outdoor_correction_sum, self.outdoor_correction_s),
             "writes": self.writes,
         }
 
@@ -97,11 +100,13 @@ class DailyLog:
         water: float | None = None,
         writes: int = 0,
         pv_w: float | None = None,
-        sun: float | None = None,
+        sun_correction: float | None = None,
+        outdoor_correction: float | None = None,
     ) -> None:
         """Add one interval to the given date.
 
-        `pv_w` is the PV power, and `sun` the change of the duty caused by the sun.
+        `pv_w` is the PV power, and the corrections are the changes of the duty caused by the
+        sun and by the outdoor temperature.
         """
         if self._day is None or self._day.date != date:
             if self._day is not None:
@@ -141,6 +146,9 @@ class DailyLog:
         if pv_w is not None:
             day.pv_s += dt_s
             day.pv_wh += pv_w * dt_s / 3600.0
-        if sun is not None:
+        if sun_correction is not None:
             day.sun_s += dt_s
-            day.sun_sum += sun * dt_s
+            day.sun_sum += sun_correction * dt_s
+        if outdoor_correction is not None:
+            day.outdoor_correction_s += dt_s
+            day.outdoor_correction_sum += outdoor_correction * dt_s

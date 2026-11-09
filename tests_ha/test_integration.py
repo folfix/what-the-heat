@@ -37,6 +37,7 @@ from custom_components.what_the_heat.const import (
     VERSION,
 )
 from custom_components.what_the_heat.coordinator import merged_config
+from custom_components.what_the_heat.core.sun import solar_time
 from custom_components.what_the_heat.diagnostics import async_get_config_entry_diagnostics
 from custom_components.what_the_heat.panel import PANEL_URL_PATH
 
@@ -46,6 +47,7 @@ HEAT_PUMP = "climate.heat_pump"
 OUTDOOR = "sensor.outdoor"
 PV = "sensor.pv_power"
 SUN = "sensor.pilot_sun_correction"
+OUTDOOR_CORRECTION = "sensor.pilot_outdoor_correction"
 MODE = "select.pilot_mode"
 TARGET = "number.pilot_target"
 DUTY = "sensor.pilot_duty"
@@ -513,6 +515,50 @@ async def test_what_a_room_learned_about_the_sun_is_restored_and_used(hass: Home
     assert entry.runtime_data.runner.snapshot()["solar"]["values"] == [40.0] * 24
 
 
+async def test_the_sun_is_learned_by_solar_time(hass: HomeAssistant, set_temperature_calls) -> None:
+    hass.config.longitude = 15.0
+    hass.states.async_set(PV, "4000", {"unit_of_measurement": "W", "device_class": "power"})
+    set_thermostat(hass, temperature=21.0, setpoint=24.0, action="heating")
+    await add_settings(hass, **{CONF_PV_ENTITY: PV})
+    entry = await add_room(hass)
+    await asyncio.sleep(0.01)
+    await tick(hass, entry)
+    date, hour = solar_time(dt_util.utcnow().timestamp(), 15.0)
+    day = entry.runtime_data.runner.snapshot()["solar"]["day"]
+    assert day["date"] == date
+    assert day["sun_s"][int(hour)] > 0.0
+
+
+async def test_without_an_outdoor_sensor_there_is_no_outdoor_correction(hass: HomeAssistant) -> None:
+    set_thermostat(hass)
+    await add_room(hass)
+    assert hass.states.get(OUTDOOR_CORRECTION).state == "unknown"
+
+
+async def test_the_outdoor_correction_waits_for_a_day_of_readings(hass: HomeAssistant) -> None:
+    set_thermostat(hass)
+    hass.states.async_set(OUTDOOR, "-4.0")
+    await add_settings(hass, **{CONF_OUTDOOR_ENTITY: OUTDOOR})
+    await add_room(hass)
+    state = hass.states.get(OUTDOOR_CORRECTION)
+    assert float(state.state) == 0.0
+    assert state.attributes["colder_than_usual"] is None
+    assert state.attributes["weight"] == 0.0
+
+
+async def test_the_learned_outdoor_weight_is_restored_and_used(hass: HomeAssistant, hass_storage, set_temperature_calls) -> None:
+    set_thermostat(hass, temperature=21.0, setpoint=24.0, action="heating")
+    hass.states.async_set(OUTDOOR, "-5.0")
+    settings_entry(**{CONF_OUTDOOR_ENTITY: OUTDOOR}).add_to_hass(hass)
+    outdoor = {"weight": 2.0, "usual": 0.0, "smoothed": -5.0, "history_s": 2 * 86400.0}
+    entry = await add_stored_room(hass, hass_storage, mode="active", target=21.0, integral=20.0, outdoor=outdoor)
+    state = hass.states.get(OUTDOOR_CORRECTION)
+    assert float(state.state) > 0.0
+    assert state.attributes["colder_than_usual"] == 5.0
+    assert state.attributes["weight"] == 2.0
+    assert entry.runtime_data.runner.snapshot()["outdoor"]["weight"] == 2.0
+
+
 async def test_heat_pump_is_neither_read_nor_changed(hass: HomeAssistant, set_temperature_calls) -> None:
     hass.states.async_set(HEAT_PUMP, "heat", {"temperature": 40.0, "current_temperature": 55.7})
     set_thermostat(hass, temperature=20.0, setpoint=15.0)
@@ -768,6 +814,7 @@ async def test_diagnostics_contain_the_daily_measurements(hass: HomeAssistant) -
     assert result["today"]["outdoor_mean"] == 4.2
     assert result["today"]["water_mean"] == 30.0
     assert result["today"]["pv_kwh"] is not None
+    assert result["today"]["outdoor_correction_pct"] == 0.0
     assert result["days"] == []
     shared = await async_get_config_entry_diagnostics(hass, settings)
     assert shared == {"shared": result["shared"]}

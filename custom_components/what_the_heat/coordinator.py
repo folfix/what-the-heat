@@ -50,6 +50,7 @@ from .const import (
     UPDATE_INTERVAL_S,
 )
 from .core.daily import DailyLog
+from .core.sun import solar_time
 from .core.runner import (
     Command,
     CommandKind,
@@ -87,6 +88,7 @@ class ZoneData:
     sun: float | None
     today: dict[str, Any] | None
     learned: LearnedState
+    colder_than_usual: float | None
 
 
 def merged_config(entry: ConfigEntry) -> dict[str, Any]:
@@ -168,6 +170,7 @@ class ZoneCoordinator(DataUpdateCoordinator[ZoneData]):
             writes=state.get("writes", 0),
             learned_s=state.get("learned_s", 0.0),
             solar=state.get("solar"),
+            outdoor=state.get("outdoor"),
         )
         self.log = DailyLog(**stored.get("log", {}))
 
@@ -177,18 +180,18 @@ class ZoneCoordinator(DataUpdateCoordinator[ZoneData]):
 
     async def _async_update_data(self) -> ZoneData:
         now_s = dt_util.utcnow().timestamp()
-        local = dt_util.now()
-        date = local.date().isoformat()
         reading = read_thermostat(self.hass.states.get(self._thermostat))
         water = self._global.water_temperature
         outdoor = self._read_number(self._global.outdoor_entity)
         pv_w = self._read_power(self._global.pv_entity)
         sun = self._global.sun_share(pv_w, now_s)
-        step = self.runner.step(now_s, reading, water, sun, date, local.hour)
+        # The sun is learned by solar time, which does not jump when the clocks change.
+        solar_date, solar_hour = solar_time(now_s, self.hass.config.longitude)
+        step = self.runner.step(now_s, reading, water, sun, solar_date, solar_hour, outdoor)
         decision = step.decision
         LOGGER.debug(
-            "%s: mode=%s status=%s room=%s filtered=%s setpoint=%s hvac=%s/%s water=%s sun=%s "
-            "duty=%.1f sun_correction=%.1f integral=%.1f valve_open=%s requested=%s commands=%d",
+            "%s: mode=%s status=%s room=%s filtered=%s setpoint=%s hvac=%s/%s water=%s sun=%s outdoor=%s "
+            "duty=%.1f sun_correction=%.1f outdoor_correction=%.1f integral=%.1f valve_open=%s requested=%s commands=%d",
             self._thermostat,
             step.mode.value,
             decision.status.value,
@@ -199,8 +202,10 @@ class ZoneCoordinator(DataUpdateCoordinator[ZoneData]):
             reading.hvac_action,
             water,
             sun,
+            outdoor,
             decision.duty,
             decision.sun,
+            decision.outdoor,
             decision.integral,
             decision.valve_open,
             decision.setpoint,
@@ -211,7 +216,7 @@ class ZoneCoordinator(DataUpdateCoordinator[ZoneData]):
         dt_s = 0.0 if self._last_step_s is None else min(now_s - self._last_step_s, MAX_LOG_STEP_S)
         self._last_step_s = now_s
         self.log.add(
-            date,
+            dt_util.now().date().isoformat(),
             dt_s,
             target=self.runner.target,
             temperature=reading.temperature,
@@ -221,14 +226,17 @@ class ZoneCoordinator(DataUpdateCoordinator[ZoneData]):
             water=water,
             writes=step.new_writes,
             pv_w=pv_w,
-            sun=None if sun is None else decision.sun,
+            sun_correction=None if sun is None else decision.sun,
+            outdoor_correction=None if outdoor is None else decision.outdoor,
         )
         self._update_notification(step.problems)
         # A delayed save restarts its timer on each call, so it is only called when due.
         if now_s - self._last_save_s >= SAVE_INTERVAL_S:
             self._last_save_s = now_s
             self._store.async_delay_save(self.snapshot, 1)
-        return ZoneData(step, reading, water, outdoor, sun, self.log.today, self.runner.learned())
+        return ZoneData(
+            step, reading, water, outdoor, sun, self.log.today, self.runner.learned(), self.runner.colder_than_usual
+        )
 
     def _available_state(self, entity_id: str | None) -> State | None:
         state = self.hass.states.get(entity_id) if entity_id else None

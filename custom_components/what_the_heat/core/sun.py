@@ -3,14 +3,29 @@
 PV power shows the sun as soon as it shines, often hours before a room's reading does,
 since the sun reaches the panels and the windows at different times and the screed and
 the air are slow. Each room learns, hour by hour, how much heat the sun makes unnecessary.
+The hours are solar time, so that the profile stays with the sun when the clocks change.
 """
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
+from datetime import date
 
 HOURS = 24
 DAY_S = 86400.0
+_EPOCH = date(1970, 1, 1).toordinal()
+
+
+def solar_time(utc_s: float, longitude: float) -> tuple[str, float]:
+    """Return the solar date and hour of the day, from 0 to 24, at a longitude in degrees east.
+
+    Unlike the clock, solar time does not jump when the clocks change, and the sun is
+    highest at about 12 all year.
+    """
+    shifted_s = utc_s + longitude / 15.0 * 3600.0
+    day = math.floor(shifted_s / DAY_S)
+    return date.fromordinal(_EPOCH + day).isoformat(), (shifted_s - day * DAY_S) / 3600.0
 
 
 @dataclass(frozen=True)
@@ -130,13 +145,24 @@ class SolarProfile:
         """Return whether the profile has learned enough to act."""
         return self._sunny_days >= self._config.min_sunny_days
 
-    def feedforward(self, hour: int, sun: float | None) -> float:
+    def feedforward(self, hour: float, sun: float | None) -> float:
         """Return the change of the controller output for the sun now. It is never positive."""
         if not self.active or not sun:
             return 0.0
-        return -self._values[hour % HOURS] * sun
+        return -self.value_at(hour) * sun
 
-    def add(self, date: str, hour: int, dt_s: float, sun: float | None, deviation: float | None) -> None:
+    def value_at(self, hour: float) -> float:
+        """Return the value at a moment of the day.
+
+        Each value stands for the middle of its hour, and moments in between take from
+        both neighbours, so that the change does not jump at the full hour.
+        """
+        position = hour - 0.5
+        index = math.floor(position)
+        weight = position - index
+        return (1.0 - weight) * self._values[index % HOURS] + weight * self._values[(index + 1) % HOURS]
+
+    def add(self, date: str, hour: float, dt_s: float, sun: float | None, deviation: float | None) -> None:
         """Add one interval. A new date closes the previous day and learns from it."""
         if self._day is None or self._day.date != date:
             if self._day is not None:
@@ -144,7 +170,7 @@ class SolarProfile:
             self._day = _Day(date)
         if dt_s <= 0:
             return
-        index = hour % HOURS
+        index = math.floor(hour) % HOURS
         if sun is not None:
             self._day.sun_sum[index] += sun * dt_s
             self._day.sun_s[index] += dt_s

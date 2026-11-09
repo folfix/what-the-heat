@@ -1,6 +1,8 @@
 import unittest
 
-from custom_components.what_the_heat.core.sun import HOURS, SolarConfig, SolarProfile, SunSignal
+from datetime import datetime, timezone
+
+from custom_components.what_the_heat.core.sun import HOURS, SolarConfig, SolarProfile, SunSignal, solar_time
 
 DAY_S = 86400.0
 HOUR = 3600.0
@@ -21,6 +23,26 @@ def live_day(
 
 def close_day(profile: SolarProfile, date: str = "next") -> None:
     profile.add(date, 0, 0.0, None, None)
+
+
+def utc(text: str) -> float:
+    return datetime.fromisoformat(text).replace(tzinfo=timezone.utc).timestamp()
+
+
+class SolarTimeTest(unittest.TestCase):
+    def test_solar_time_follows_the_longitude(self) -> None:
+        self.assertEqual(solar_time(utc("2026-11-09T11:00:00"), 15.0), ("2026-11-09", 12.0))
+        self.assertEqual(solar_time(utc("2026-11-09T11:00:00"), 0.0), ("2026-11-09", 11.0))
+
+    def test_the_solar_day_starts_at_solar_midnight(self) -> None:
+        self.assertEqual(solar_time(utc("2026-11-09T23:30:00"), 15.0), ("2026-11-10", 0.5))
+        self.assertEqual(solar_time(utc("2026-11-10T00:30:00"), -15.0), ("2026-11-09", 23.5))
+
+    def test_it_does_not_jump_when_the_clocks_change(self) -> None:
+        # In 2026 the clocks in central Europe went back at 01:00 UTC on 25 October.
+        before = solar_time(utc("2026-10-25T00:30:00"), 20.0)[1]
+        after = solar_time(utc("2026-10-25T01:30:00"), 20.0)[1]
+        self.assertAlmostEqual(after - before, 1.0)
 
 
 class SunSignalTest(unittest.TestCase):
@@ -99,6 +121,15 @@ class SolarProfileTest(unittest.TestCase):
         self.assertEqual(profile.feedforward(10, 0.5), -20.0)
         self.assertEqual(profile.feedforward(10, 0.0), 0.0)
         self.assertEqual(profile.feedforward(10, None), 0.0)
+
+    def test_the_change_moves_smoothly_between_hours(self) -> None:
+        values = [0.0] * HOURS
+        values[10] = 40.0
+        profile = SolarProfile(values=values, sunny_days=SolarConfig().min_sunny_days)
+        self.assertEqual(profile.feedforward(10.5, 1.0), -40.0)
+        self.assertEqual(profile.feedforward(10.0, 1.0), -20.0)
+        self.assertEqual(profile.feedforward(11.25, 1.0), -10.0)
+        self.assertEqual(profile.feedforward(9.5, 1.0), 0.0)
 
     def test_an_hour_with_too_little_data_is_left_out(self) -> None:
         profile = SolarProfile()

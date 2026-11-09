@@ -113,6 +113,18 @@ class PilotRoomTest(unittest.TestCase):
                 self.assertLess(learned.rms, without.rms + 0.02)
                 self.assertGreater(learned.low, without.low - 0.1)
 
+    def test_the_outdoor_correction_follows_the_weather(self) -> None:
+        fronts = (0.0, -3.0, -6.0, -4.0, 0.0, 3.0, 1.0)
+        for label in ("reference", "high losses", "cold ground"):
+            with self.subTest(room=label):
+                parameters, ground = ROOMS[label]
+                environment = Environment(water_setpoint=38.0, ground=ground, outdoor_mean=0.0, outdoor_swing=5.0, outdoor_days=fronts)
+                run = {"days": 28.0, "settle_days": 14.0}
+                without = simulate(parameters, environment, TARGET, **run)
+                learned = simulate(parameters, environment, TARGET, use_outdoor=True, **run)
+                self.assertLess(learned.rms, 0.9 * without.rms)
+                self.assertGreaterEqual(learned.within_band_pct, without.within_band_pct)
+
     def test_unreachable_target_saturates_without_alarm_from_the_watchdog(self) -> None:
         parameters, ground = ROOMS["high losses"]
         result = simulate(parameters, Environment(water_setpoint=30.0, ground=ground), TARGET)

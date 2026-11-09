@@ -22,7 +22,7 @@ The first time, the form asks for the sensors shared by all rooms:
 
 | Field | Value |
 |---|---|
-| Outdoor temperature sensor | The outdoor sensor. It is only logged for now. |
+| Outdoor temperature sensor | The outdoor sensor, preferably in the shade. Each room learns how much more heat it needs when it is colder outside than usual. |
 | PV power sensor | The power of a PV installation, if there is one, preferably read locally. Each room then learns what the sun does to it. |
 
 They become the **Shared settings** entry of the integration. Change them later with **Configure** on that entry.
@@ -74,6 +74,7 @@ The **What the Heat** page in the sidebar shows the main values for all rooms, a
 | Duty | The share of time the valve should be open |
 | Learned demand | The share of time the valve needs to be open to hold the target at the current water temperature. Empty until there are about 6 hours of data near the target. The attributes say how much data is behind it and where it comes from. |
 | Sun correction | How much the sun takes off the duty right now, with a PV sensor set. It stays at 0 until the room has learned from 3 sunny days, which the `sunny_days` attribute counts. `sun_pct` is the PV power as a share of the highest seen lately. |
+| Outdoor correction | How much the weather adds to or takes off the duty right now, with an outdoor sensor set. `colder_than_usual` says how much colder than the last day's average it is outside, and stays empty for the first day. `weight` is what the room has learned so far, and starts at 0. |
 | Valve requested | What the controller wants right now |
 | Setpoint writes | Total number of writes to the thermostat |
 | Resent commands | Commands sent again by the watchdog |

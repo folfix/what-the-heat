@@ -14,6 +14,7 @@ from custom_components.what_the_heat.core.runner import (
     ThermostatReading,
     ZoneRunner,
 )
+from custom_components.what_the_heat.core.outdoor import OutdoorConfig
 from custom_components.what_the_heat.core.sun import SolarConfig
 from custom_components.what_the_heat.core.valve import WatchdogConfig
 from custom_components.what_the_heat.core.zone import ZoneConfig, ZoneStatus
@@ -52,10 +53,17 @@ class Environment:
     sun_hours: tuple[float, float] = (9.3, 16.3)
     pv_hours: tuple[float, float] = (7.5, 15.5)
     clear_days: tuple[float, ...] = (1.0,)
+    # A change of the daily mean outdoor temperature for each day, repeating, reached gradually.
+    outdoor_days: tuple[float, ...] = (0.0,)
 
     def outdoor(self, now_s: float) -> float:
         hour = (now_s / 3600.0) % 24.0
-        return self.outdoor_mean + self.outdoor_swing * math.sin(2.0 * math.pi * (hour - 9.0) / 24.0)
+        day = now_s / DAY_S
+        index = int(day)
+        days = self.outdoor_days
+        share = day - index
+        offset = (1.0 - share) * days[index % len(days)] + share * days[(index + 1) % len(days)]
+        return self.outdoor_mean + offset + self.outdoor_swing * math.sin(2.0 * math.pi * (hour - 9.0) / 24.0)
 
     def clearness(self, now_s: float) -> float:
         return self.clear_days[int(now_s // DAY_S) % len(self.clear_days)]
@@ -136,6 +144,8 @@ def simulate(
     reset_learning_at_s: float | None = None,
     use_pv: bool = False,
     sun_config: SolarConfig | None = None,
+    use_outdoor: bool = False,
+    outdoor_config: OutdoorConfig | None = None,
 ) -> Result:
     """Run the room and return what happened after the settling period.
 
@@ -143,7 +153,8 @@ def simulate(
     observe mode, and the runner then takes over. In that case settle_days counts from
     the takeover. With assumed_water the controller believes in a water temperature
     other than the real setpoint. With reset_learning_at_s the owner presses the reset
-    button at that moment. With use_pv the controller sees the PV share of full sun.
+    button at that moment. With use_pv the controller sees the PV share of full sun, and
+    with use_outdoor the outdoor temperature.
     """
     faults = faults or Faults()
     rng = random.Random(faults.seed)
@@ -159,6 +170,7 @@ def simulate(
         zone=zone_config or ZoneConfig(target=target),
         watchdog=WatchdogConfig(differential=thermostat.differential),
         sun=sun_config or SolarConfig(),
+        outdoor=outdoor_config or OutdoorConfig(),
     )
     runner = None
     if use_controller:
@@ -203,7 +215,8 @@ def simulate(
                 environment.water_setpoint if assumed_water is None else assumed_water,
                 sun=environment.pv(now_s) if use_pv else None,
                 date=str(int(now_s // DAY_S)),
-                hour=int((now_s / 3600.0) % 24.0),
+                hour=(now_s / 3600.0) % 24.0,
+                outdoor=environment.outdoor(now_s) if use_outdoor else None,
             )
             result.statuses.add(step.decision.status)
             result.resends = step.resends

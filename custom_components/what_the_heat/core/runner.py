@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 
+from .outdoor import OutdoorConfig, OutdoorCorrection
 from .smoothing import ExponentialFilter
 from .sun import SolarConfig, SolarProfile
 from .valve import ValveWatchdog, WatchdogConfig, WatchdogResult
@@ -72,6 +73,7 @@ class RunnerConfig:
     zone: ZoneConfig = field(default_factory=ZoneConfig)
     watchdog: WatchdogConfig = field(default_factory=WatchdogConfig)
     sun: SolarConfig = field(default_factory=SolarConfig)
+    outdoor: OutdoorConfig = field(default_factory=OutdoorConfig)
     heat_mode_retry_s: float = 5 * 60.0
     heat_mode_attempts: int = 3
     heating_share_time_constant_s: float = 24 * 3600.0
@@ -88,8 +90,9 @@ class LearnedState:
     where it comes from: "controller" while it is in charge, otherwise "thermostat", from
     what the thermostat has been doing on its own. `hours` is how much data is behind it,
     and `recent_heating` the percentage of about the last day that the relay was on.
-    `sun_profile` holds, for each hour, how much less heat the room needs at full sun,
-    learned from `sunny_days` days. It acts once `sun_active` is set.
+    `sun_profile` holds, for each solar hour, how much less heat the room needs at full sun,
+    learned from `sunny_days` days. It acts once `sun_active` is set. `outdoor_weight` is how
+    much more heat, in the integral's percent, each kelvin colder than usual outside needs.
     """
 
     demand: float | None
@@ -99,6 +102,7 @@ class LearnedState:
     sunny_days: int
     sun_active: bool
     sun_profile: tuple[float, ...]
+    outdoor_weight: float
 
 
 @dataclass(frozen=True)
@@ -124,6 +128,8 @@ class ZoneRunner:
 
     With a share of full sun from PV, the room learns what the sun does to it while in
     active mode, and once it has learned enough, opens the valve less while the sun shines.
+    With an outdoor temperature, it also learns how much more heat it needs when it is
+    colder outside than usual.
     """
 
     def __init__(
@@ -138,6 +144,7 @@ class ZoneRunner:
         writes: int = 0,
         learned_s: float = 0.0,
         solar: dict | None = None,
+        outdoor: dict | None = None,
     ) -> None:
         self._config = config or RunnerConfig()
         self._mode = mode
@@ -147,6 +154,7 @@ class ZoneRunner:
         if heating_share is not None:
             self._heating_share.update(heating_share, 0.0)
         self._solar = SolarProfile(self._config.sun, **(solar or {}))
+        self._outdoor = OutdoorCorrection(self._config.outdoor, **(outdoor or {}))
         self._observed_s = observed_s
         self._learned_s = learned_s
         self._writes = writes
@@ -172,6 +180,11 @@ class ZoneRunner:
         self._controller.target = value
 
     @property
+    def colder_than_usual(self) -> float | None:
+        """Return how much colder than usual it is outside, or None while that is unknown."""
+        return self._outdoor.difference
+
+    @property
     def commanded(self) -> float | None:
         """Return the setpoint most recently commanded."""
         return self._watchdog.commanded
@@ -193,6 +206,7 @@ class ZoneRunner:
         """Forget what was learned about the room. The mode, target and counters stay."""
         self._controller.reset_learning()
         self._solar.reset()
+        self._outdoor.reset()
         self._heating_share.reset()
         self._observed_s = 0.0
         self._learned_s = 0.0
@@ -219,6 +233,7 @@ class ZoneRunner:
             solar.sunny_days,
             solar.active,
             solar.values,
+            self._outdoor.weight,
         )
 
     def snapshot(self) -> dict:
@@ -231,6 +246,7 @@ class ZoneRunner:
             "learned_s": self._learned_s,
             "writes": self._writes,
             "solar": self._solar.snapshot(),
+            "outdoor": self._outdoor.snapshot(),
             **self._controller.snapshot(),
         }
 
@@ -241,23 +257,33 @@ class ZoneRunner:
         water_temperature: float | None = None,
         sun: float | None = None,
         date: str | None = None,
-        hour: int | None = None,
+        hour: float | None = None,
+        outdoor: float | None = None,
     ) -> RunnerStep:
         """Advance by one step and return what should be done.
 
-        `sun` is the share of full sun from PV, and `date` and `hour` the local date and
+        `sun` is the share of full sun from PV, and `date` and `hour` the solar date and
         hour of the day, which the room needs to learn what the sun does at each hour.
+        `outdoor` is the outdoor temperature.
         """
         dt_s = 0.0 if self._last_step_s is None else now_s - self._last_step_s
         self._last_step_s = now_s
         writes_before = self._writes
-        feedforward = 0.0 if hour is None else self._solar.feedforward(hour, sun)
+        self._outdoor.update(outdoor, dt_s)
         self._controller.set_device_limits(reading.min_temp, reading.max_temp, reading.setpoint_step)
-        decision = self._controller.step(now_s, reading.temperature, water_temperature, feedforward)
+        decision = self._controller.step(
+            now_s,
+            reading.temperature,
+            water_temperature,
+            sun=0.0 if hour is None else self._solar.feedforward(hour, sun),
+            outdoor=self._outdoor.feedforward(),
+        )
         self._track_heating(reading, water_temperature, dt_s)
         step_s = min(dt_s, self._config.zone.max_integration_step_s)
         if self._mode is Mode.ACTIVE and decision.learning:
             self._learned_s += step_s
+            # Only time when the integral could move teaches the weight, as it does the integral.
+            self._outdoor.learn(self.target - decision.temperature, step_s, sun)
         if self._mode is Mode.ACTIVE and date is not None and hour is not None:
             deviation = None if reading.temperature is None or decision.temperature is None else decision.temperature - self.target
             self._solar.add(date, hour, step_s, sun, deviation)
