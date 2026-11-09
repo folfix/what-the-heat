@@ -69,8 +69,9 @@ The guiding principle **[REQUIREMENT]**: it is better to use a low water tempera
 | Buffer and mixing valves | About 200 L buffer, one three-way mixing valve per floor, fixed at 30 °C | The value is a global setting of the integration (6.6). |
 | Manifold pump | Unknown | **[TODO]** behaviour when all loops are closed (bypass, relief valve, pump stop). |
 | Floors | No floor sensors | The temperature set on the mixing valves is what protects the floor. |
-| Outdoor temperature | Sonoff SNZB-02P over Zigbee, placed in the shade | Primary outdoor reading. Weak link margin (about -89 dBm) and 42% battery seen, so a fallback is required. |
+| Outdoor temperature | Sonoff SNZB-02P over Zigbee, placed in the shade | Primary outdoor reading, one for all rooms. Weak link margin (about -89 dBm) and 42% battery seen, so a fallback is required. |
 | Weather | AccuWeather integration | Hourly forecast with cloud coverage. |
+| PV installation | Inverter read locally in Home Assistant | Its power is the sun signal (6.5), one for all rooms. Never required. |
 | History | **[TODO]** recorder retention | Learning needs at least 14 days of data. Extend retention now. |
 
 ### 3.1 MTS200 through Meross LAN (checked in the integration source)
@@ -175,8 +176,8 @@ Worked example with `k1 = 0.27`, `k3 = 0.94`, target 21 °C, 3 °C outdoors: `L 
 |---|---|---|
 | L0 Valve | Opens and closes the loop through the setpoint, with a watchdog | writes on change, checks every 5 min |
 | L1 Zone | PID, duty calculation, cycle scheduling across zones | 60 s |
-| L2 Prediction | Outdoor and solar feed-forward from the forecast | 30 min |
-| Learning | Refits per-room parameters | nightly |
+| L2 Prediction | Solar feed-forward from PV, and outdoor feed-forward from the forecast (planned) | 60 s for PV, 30 min for the forecast |
+| Learning | Refits per-room parameters, such as the solar profile | nightly |
 
 ### 6.3 L0: valve
 
@@ -203,7 +204,8 @@ Worked example with `k1 = 0.27`, `k3 = 0.94`, target 21 °C, 3 °C outdoors: `L 
 ### 6.5 L2: prediction
 
 - Outdoor temperature comes from the local sensor. The forecast contributes only its change: `T_out(+2 h) = sensor(now) + forecast(+2 h) - forecast(now)`. The forecast and the sensor differ (6.8 °C against 4.2 °C on one observed day), and a constant ±2.6 K error did not change the simulated result.
-- The solar signal is the hourly cloud forecast through the Kasten-Czeplak attenuation. Scaling by clear-sky irradiance for seasonal change is planned and not yet tested.
+- The solar signal is the power of a PV installation read locally, as a share of full sun. Full sun is the highest power seen, fading with a 30 day half-life, so that the lower sun of another season reaches full sun again. PV shows the sun as it shines, often before the room does: in the pilot house in November the panels saw the sun from about 07:30, and the main room's reading jumped at about 09:20. When the sun reaches the panels and each room's windows is learned per room, hour by hour (6.7). Snow on the panels reads as no sun, so the room then runs as it would without PV.
+- The hourly cloud forecast through the Kasten-Czeplak attenuation would warn earlier, before sunrise. It is planned, with scaling by clear-sky irradiance for seasonal change, and not yet implemented.
 
 ### 6.6 Water temperature
 
@@ -226,11 +228,11 @@ duty = L / (T_water - T_room - k3 * L)
 
 New values are blended in (85% old, 15% new). No deliberate cooling of rooms is needed, so step tests are optional.
 
-**Solar profile: 24 values.** Each night, each hourly value moves according to the room's mean deviation 2 hours later, weighted by that day's forecast clearness, and the profile is smoothed across neighbouring hours and kept non-negative. Window orientation does not have to be configured. In simulation the peak correction emerged by itself: 8:00 for an east room, 10:00 for a south room, 13:00 for a west room.
+**Solar profile: 24 values, implemented with PV.** After each day, each hourly value moves by `rate * gain * share * deviation`: the mean share of full sun in that hour, times the room's mean deviation from its target 2 hours later, with a rate of 0.25 and a gain of 80 %/K like the proportional gain. The profile is then smoothed, each hour taking 0.2 of each neighbour, and kept between 0 and 100, in the controller's percent like the integral. It learns only in active mode. Once it has learned from 3 sunny days, meaning days with at least 2 hours' worth of full sun, it subtracts `value[hour] * share now` from the controller output, so that the valve opens less while the sun shines, and never more. Window orientation does not have to be configured. In an earlier simulation that weighted the deviation by the forecast clearness instead of PV, the peak correction emerged by itself: 8:00 for an east room, 10:00 for a south room, 13:00 for a west room.
 
 **Recurring gains: 24 values.** The same rule, weighted towards cloudy days, with the mean removed and values limited. This captures things like cooking.
 
-**Safeguards.** Parameters are bounded. Learned feed-forward becomes active only after at least 14 days of data and a daily balance error below about 5 percentage points. A room falls back to PID if it performs worse with learning than without it over a recent window (this safeguard is not yet simulated). Learned values are visible in diagnostics, and learning can be switched off per room. Learning skips periods with open windows and re-syncs after data gaps. It also skips days when a room is recovering from a cold start, because heat going into a cold floor and cold walls says nothing about steady losses.
+**Safeguards.** Parameters are bounded. The daily balance becomes active only after at least 14 days of data and a daily balance error below about 5 percentage points. The solar profile acts sooner, after 3 sunny days, because it can only lower the heating, is bounded, and learns back when the room ends up below its target. A room falls back to PID if it performs worse with learning than without it over a recent window (this safeguard is not yet simulated). Learned values are visible in diagnostics, and learning can be switched off per room. Learning skips periods with open windows and re-syncs after data gaps. It also skips days when a room is recovering from a cold start, because heat going into a cold floor and cold walls says nothing about steady losses.
 
 ### 6.8 Failure handling
 
@@ -248,16 +250,16 @@ Valve exercise: any loop idle for 7 days is opened for 15 minutes. The 15 second
 
 ### 6.9 Integration and repository
 
-Each room is one configuration entry. The integration exposes the target, duty, PID terms, valve state, status and daily comfort metrics as entities, plus a diagnostics download with one row per day. Each room also has a thermostat entity for dashboards, with the modes as presets. A sidebar page shows all rooms as tiles, using plain JavaScript with no build step. Each zone has a mode: `observe` (calculates and logs only, the default for a new room), `active`, or `handback`.
+Each room is one configuration entry. The water temperature and the outdoor and PV sensors are shared by all rooms: they are set on the sidebar page or with the services `set_water_temperature` and `set_sensors`, and stored apart from the rooms. The integration exposes the target, duty, PID terms, sun correction, valve state, status and daily comfort metrics as entities, plus a diagnostics download with one row per day. Each room also has a thermostat entity for dashboards, with the modes as presets. A sidebar page shows all rooms as tiles, using plain JavaScript with no build step. Each zone has a mode: `observe` (calculates and logs only, the default for a new room), `active`, or `handback`.
 
 On switching from `observe` to `active`, the integral starts from how much the thermostat has recently been heating, but only if the room is near its target. Otherwise it starts from zero.
 
-Until the learning of 6.7 exists, what a room has learned is its steady demand. The `Learned demand` sensor and the sidebar page show it as the valve opening needed at the current water temperature, once at least 6 hours of data are behind it. While `active` it comes from the integral, and only time when the integral could move counts as data, so a cold room warming at full duty learns nothing. Otherwise it comes from the heating share of the thermostat, if the room is near its target. A `Reset learning` button clears the integral, the carried on-time, the heating share and the data counters. It keeps the mode, the target, the counters of writes and the daily rows, which are measurements and not learned. In simulation a reset of a settled room at 34 °C or 38 °C water lowered the minimum by 0.4 to 1.6 °C, and cost 3 to 15 extra hours outside ±0.3 °C in most rooms. The worst cases were a room with high losses at 34 °C with 31 hours, and a room with heavy air at 30 °C with 60 hours.
+Until the learning of 6.7 exists, what a room has learned is its steady demand. The `Learned demand` sensor and the sidebar page show it as the valve opening needed at the current water temperature, once at least 6 hours of data are behind it. While `active` it comes from the integral, and only time when the integral could move counts as data, so a cold room warming at full duty learns nothing. Otherwise it comes from the heating share of the thermostat, if the room is near its target. A `Reset learning` button clears the integral, the carried on-time, the heating share, the solar profile and the data counters. It keeps the mode, the target, the counters of writes and the daily rows, which are measurements and not learned. In simulation a reset of a settled room at 34 °C or 38 °C water lowered the minimum by 0.4 to 1.6 °C, and cost 3 to 15 extra hours outside ±0.3 °C in most rooms. The worst cases were a room with high losses at 34 °C with 31 hours, and a room with heavy air at 30 °C with 60 hours.
 
 ```
 custom_components/what_the_heat/
   core/          pure Python, no Home Assistant imports
-                 (pid, cycle, valve, zone, runner, daily)
+                 (pid, cycle, valve, zone, runner, daily, sun)
   frontend/      sidebar page
   ...            thin Home Assistant layer
 tests/           core tests, no dependencies
@@ -285,7 +287,10 @@ docs/
 | Floor offset filter | 3 h | simulation |
 | Water temperature | 30 °C, one global value | owner |
 | Learning window | 30 days, minimum 14 days | simulation |
-| Solar and gains learning rate | 2 and 1 per day, deviation lag 2 h | simulation |
+| Full sun | Highest PV power seen, half-life 30 days | this project |
+| Solar profile | Rate 0.25 and gain 80 %/K per day, deviation lag 2 h, smoothing 0.2, values 0-100 | simulation (8.9), lag as seen in the pilot house |
+| Solar profile acts after | 3 sunny days, each with at least 2 hours' worth of full sun | this project |
+| Gains learning rate | 1 per day, deviation lag 2 h | simulation |
 | Model trust threshold | daily balance error under about 5 points | proposal, unverified |
 | Watchdog | every 5 min, alert after 3 mismatches | hass-ufh-controller, this project |
 | Valve exercise | 7 days, 15 min | RoomMind (interval) |
@@ -413,6 +418,26 @@ The first real night with this window, in that room at 30 °C water: from 03:30 
 
 Cycles stretched at extreme duties were compared with a fixed 30 minutes, on five room types with a daily sun peak of 800 or 1500 W at 34 °C water, and 800 W at 30 °C. The lowest temperature after the sun rose in most cases, for example from 20.45 to 20.87 °C and from 20.07 to 20.69 °C at a 21 °C target. Without sun the results stayed about the same, with fewer writes in mild weather. The table above comes from before the cycle was fixed, so it still shows the stretched variant.
 
+### 8.9 Solar profile from PV
+
+Run it with `python -m tests.simulation.sun`. Five room types (reference, low losses, slow floor, light room, heavy air) at a 21 °C target, water at 30 or 34 °C, outdoor mean -1 °C, and sun through the windows peaking at 800 or 1500 W. Each run lasts 3 weeks, of which the last 2 are measured. The days repeat a week of full sun with one day at 30% and one at 60%. The panels see the sun from 07:30 to 15:30 and the windows from 09:20 to 16:20, shaped on the pilot house in November. Means over the 20 cases:
+
+| | Plain thermostat | Controller without PV | Controller with the solar profile |
+|---|---|---|---|
+| Within ±0.3 °C | 44% | 57% | 66% |
+| RMS deviation | 0.83 °C | 0.93 °C | 0.73 °C |
+| Highest | 23.14 °C | 23.33 °C | 22.96 °C |
+| Lowest | 20.46 °C | 20.64 °C | 20.65 °C |
+| Above the band | 7.3 K·h a day | 9.1 K·h a day | 6.5 K·h a day |
+| Below the band | 1.6 K·h a day | 1.2 K·h a day | 1.0 K·h a day |
+
+- Without PV the controller overheats sunny rooms more than the plain thermostat, which lets the floor cool further between its long cycles.
+- With full sun every day, the profile closes the valve earlier in the morning. The lowest temperature then fell by up to 0.2 °C, with almost no time below the band.
+- In rooms the sun does not reach while the panels see it, the profile changed nothing worth noting: RMS 0.131 against 0.143 °C.
+- Not lowering the integral while the sun had recently shone, so that a sun-warmed room would not lower its steady demand, made no difference (RMS 0.740 against 0.732 °C) and was left out.
+- A rate of 0.5 or a lag of 3 hours did slightly better than the chosen 0.25 and 2 hours, at an RMS of 0.71-0.72 against 0.73 °C, and a rate of 0.1 or a lag of 1 hour slightly worse, at 0.76-0.78 °C. Without smoothing, or with values limited to 50, the RMS was 0.76-0.78 °C. The settings stay on the cautious side and on the lag seen in the pilot house.
+- The model does not include sun falling on the thermostat itself, which the pilot house showed.
+
 ---
 
 ## 9. Roadmap
@@ -423,7 +448,7 @@ Cycles stretched at extreme duties were compared with a fixed 30 minutes, on fiv
 | 1 Core and simulator | Pure Python core and simulator with failure injection | Done for the pilot scope: PID, cycles, valve, watchdog, zone |
 | 2 Integration | Home Assistant layer with `observe`, `active` and `handback` modes, and daily rows logged | Built and tested against a stand-in thermostat. Calculated duty still has to be checked next to the real thermostat. |
 | 3 Pilot | One room live, see 9.1 | Criteria in 9.1 met |
-| 4 Learning and prediction | Learning and feed-forward, first in the simulator, then on the pilot room | Smaller RMS deviation than PID alone |
+| 4 Learning and prediction | Learning and feed-forward, first in the simulator, then on the pilot room. The solar profile from PV is built. | Smaller RMS deviation than PID alone |
 | 5 All rooms | All zones, phase staggering, manifold recommendations | One stable week |
 | Later, optional | Shading, online EKF, MPC | Justified by data |
 
@@ -463,6 +488,7 @@ All based on what can be measured: air temperature and valve state.
 | The water is too cold for a room in cold weather | The room stays fully open and below target. Raise the temperature by hand, on the valves and in the setting. See 8.7. |
 | The global setting differs from the real water temperature, or the buffer falls below the mixing setpoint | The integral compensates a steady difference. See 8.6 for the tolerance. |
 | Learning degrades a room | Bounds, trust threshold, fallback to PID, per-room switch |
+| PV misreads the sun on a room's windows: snow on the panels, or panels facing elsewhere | Snow reads as no sun, so the room runs as without PV. The solar profile only lowers heating, is bounded, and learns back when the room ends up below its target. |
 | Frequent setpoint writes wear out a thermostat | About 96 writes a day per room with the 30 minute window. Whether the device stores each one in flash memory, and how long that lasts, is unknown. If it matters, lengthen the window. |
 | Integration bug affects Home Assistant, since it runs in-process | Async only, no blocking work, core tested separately |
 | Short cycling of the compressor at low load | Phase staggering, longer open times. Partly limited by hardware. |
@@ -495,6 +521,8 @@ All based on what can be measured: air temperature and valve state.
 | No floor temperature anywhere in the control path | No sensors exist, and simulation shows it is not needed |
 | Learning through small per-room layers rather than a neural network | Limited data, explainability, safety |
 | No reading or control of the buffer or heat pump, and one global water temperature | Owner decision: each floor has a mixing valve fixed at 30 °C |
+| PV power, read locally, as the sun signal | It shows the sun as it shines, often hours before a room does, without a cloud service |
+| Outdoor and PV sensors shared by all rooms | One house has one outdoor sensor and one PV installation |
 | First real test on one closed basement room at 21 °C, PID and cycles only | Least outside influence, smallest risk |
 | English only in the repository; work goes straight to the default branch | Owner decision |
 

@@ -49,6 +49,7 @@ class ZoneDecision:
     temperature: float | None
     integral: float
     learning: bool = False
+    sun: float = 0.0  # change of the duty caused by the sun, in percent, never positive
 
 
 class ZoneController:
@@ -76,6 +77,7 @@ class ZoneController:
         self._last_step_s: float | None = None
         self._last_reading_s: float | None = None
         self._duty = 0.0
+        self._sun = 0.0
 
     @property
     def target(self) -> float:
@@ -133,7 +135,10 @@ class ZoneController:
         water_temperature: float | None = None,
         feedforward: float = 0.0,
     ) -> ZoneDecision:
-        """Advance the controller and return its decision."""
+        """Advance the controller and return its decision.
+
+        A negative feedforward stands for heat the room gets from elsewhere, such as the sun.
+        """
         config = self._config
         dt_s = 0.0 if self._last_step_s is None else now_s - self._last_step_s
         self._last_step_s = now_s
@@ -145,13 +150,15 @@ class ZoneController:
         # Outside the setpoint band the thermostat acts on its own, so the controller's
         # output has no effect and must not build up in the integral.
         in_control = abs(error) <= self._valve.authority
+        scale = self.gain_scale(temperature, water_temperature)
         output = self._pid.update(
             error,
             min(dt_s, config.max_integration_step_s) if in_control else 0.0,
             feedforward,
-            self.gain_scale(temperature, water_temperature),
+            scale,
         )
         self._duty = output.duty
+        self._sun = output.duty - min(100.0, max(0.0, (output.proportional + output.integral) * scale))
         return replace(self._drive(now_s, ZoneStatus.NORMAL), learning=output.integrating)
 
     def _without_reading(self, now_s: float) -> ZoneDecision:
@@ -167,7 +174,7 @@ class ZoneController:
     def _drive(self, now_s: float, status: ZoneStatus) -> ZoneDecision:
         is_open = self._cycle.step(now_s, self._duty)
         setpoint = open_setpoint(self._target, self._valve) if is_open else closed_setpoint(self._target, self._valve)
-        return ZoneDecision(status, setpoint, is_open, self._duty, self._filter.value, self._pid.integral)
+        return ZoneDecision(status, setpoint, is_open, self._duty, self._filter.value, self._pid.integral, sun=self._sun)
 
     def _handback(self, status: ZoneStatus) -> ZoneDecision:
         return ZoneDecision(status, self._target, False, self._duty, self._filter.value, self._pid.integral)

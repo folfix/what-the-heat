@@ -186,7 +186,9 @@ class ModeChangeTest(unittest.TestCase):
         self.assertEqual(step.commands, (Command(CommandKind.SET_TEMPERATURE, OPEN),))
 
     def test_state_survives_a_restart(self) -> None:
-        zone = runner(Mode.ACTIVE, integral=33.0, writes=5, learned_s=7200.0)
+        zone = runner(Mode.ACTIVE, integral=33.0, writes=5, learned_s=7200.0, solar={"values": [5.0] * 24, "sunny_days": 4})
+        zone.step(0.0, reading(temperature=TARGET), sun=0.5, date="2026-11-09", hour=10)
+        zone.step(MINUTE, reading(temperature=TARGET), sun=0.5, date="2026-11-09", hour=10)
         state = zone.snapshot()
         restored = ZoneRunner(
             RunnerConfig(zone=ZoneConfig(target=state["target"])),
@@ -197,6 +199,7 @@ class ModeChangeTest(unittest.TestCase):
             observed_s=state["observed_s"],
             writes=state["writes"],
             learned_s=state["learned_s"],
+            solar=state["solar"],
         )
         self.assertEqual(restored.snapshot(), state)
 
@@ -329,6 +332,74 @@ class LearningTest(unittest.TestCase):
         self.assertAlmostEqual(learned.hours, 7.0, delta=0.1)
         self.assertGreater(learned.demand, 0.0)
         self.assertLess(learned.demand, 40.0)
+
+
+SUN_LEARNED = {"values": [40.0] * 24, "sunny_days": 3}
+
+
+class SunTest(unittest.TestCase):
+    def _sunny_days(self, zone: ZoneRunner, days: int, temperature: float) -> None:
+        """Days with full sun from 8 to 15, and the room at the given temperature all day."""
+        for minute in range(days * 24 * 60 + 1):
+            hour = minute // 60 % 24
+            zone.step(
+                minute * MINUTE,
+                reading(temperature=temperature, setpoint=TARGET),
+                34.0,
+                sun=1.0 if 8 <= hour < 15 else 0.0,
+                date=str(minute // (24 * 60)),
+                hour=hour,
+            )
+
+    def test_a_room_warm_after_sunny_hours_learns_about_the_sun(self) -> None:
+        zone = runner(Mode.ACTIVE, integral=30.0)
+        self._sunny_days(zone, 3, TARGET + 0.5)
+        learned = zone.learned()
+        self.assertEqual(learned.sunny_days, 3)
+        self.assertTrue(learned.sun_active)
+        self.assertGreater(learned.sun_profile[10], 0.0)
+
+    def test_nothing_is_learned_about_the_sun_unless_active(self) -> None:
+        for mode in (Mode.OBSERVE, Mode.HANDBACK):
+            with self.subTest(mode=mode):
+                zone = runner(mode)
+                self._sunny_days(zone, 2, TARGET + 0.5)
+                self.assertEqual(zone.learned().sunny_days, 0)
+                self.assertEqual(max(zone.learned().sun_profile), 0.0)
+
+    def test_learned_sun_closes_the_valve_less_or_not_at_all(self) -> None:
+        def duty(sun: float) -> tuple[float, float]:
+            zone = runner(Mode.ACTIVE, integral=30.0, solar=SUN_LEARNED)
+            decision = zone.step(0.0, reading(temperature=TARGET), 34.0, sun=sun, date="1", hour=10).decision
+            return decision.duty, decision.sun
+
+        shaded, no_sun = duty(0.0)
+        half, sun = duty(0.5)
+        self.assertEqual(no_sun, 0.0)
+        self.assertLess(half, shaded)
+        self.assertAlmostEqual(sun, half - shaded)
+
+    def test_without_pv_nothing_changes(self) -> None:
+        zone = runner(Mode.ACTIVE, integral=30.0, solar=SUN_LEARNED)
+        plain = runner(Mode.ACTIVE, integral=30.0)
+        for minute in range(60):
+            step = zone.step(minute * MINUTE, reading(temperature=TARGET), 34.0, sun=None, date="1", hour=10)
+            same = plain.step(minute * MINUTE, reading(temperature=TARGET), 34.0)
+            self.assertEqual(step.decision.duty, same.decision.duty)
+
+    def test_observing_with_sun_writes_nothing(self) -> None:
+        zone = runner(Mode.OBSERVE, solar=SUN_LEARNED)
+        for minute in range(120):
+            step = zone.step(minute * MINUTE, reading(temperature=19.0, setpoint=15.0), 34.0, sun=1.0, date="1", hour=10)
+            self.assertEqual(step.commands, ())
+
+    def test_reset_forgets_the_sun(self) -> None:
+        zone = runner(Mode.ACTIVE, solar=SUN_LEARNED)
+        zone.reset_learning()
+        learned = zone.learned()
+        self.assertEqual(learned.sunny_days, 0)
+        self.assertFalse(learned.sun_active)
+        self.assertEqual(max(learned.sun_profile), 0.0)
 
 
 if __name__ == "__main__":

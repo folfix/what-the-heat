@@ -46,6 +46,15 @@ def _learned_attributes(data: ZoneData) -> dict[str, Any]:
     }
 
 
+def _sun_attributes(data: ZoneData) -> dict[str, Any]:
+    learned = data.learned
+    return {
+        "sun_pct": None if data.sun is None else round(data.sun * 100.0, 1),
+        "sunny_days": learned.sunny_days,
+        "active": learned.sun_active,
+    }
+
+
 SENSORS = (
     ZoneSensorDescription(
         key="status",
@@ -108,6 +117,14 @@ SENSORS = (
         suggested_display_precision=0,
         value=lambda data: data.learned.demand,
         attributes=_learned_attributes,
+    ),
+    ZoneSensorDescription(
+        key="sun_correction",
+        native_unit_of_measurement=PERCENTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=0,
+        value=lambda data: None if data.sun is None else data.step.decision.sun,
+        attributes=_sun_attributes,
     ),
     ZoneSensorDescription(
         key="integral",

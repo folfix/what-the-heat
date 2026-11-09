@@ -7,7 +7,7 @@ A Home Assistant custom integration that keeps each room at its target temperatu
 - **Per-room control:** a duty cycle applied through ordinary thermostat setpoints.
 - **No floor sensors:** floor temperature is never needed.
 - **No heat source control:** the water temperature is fixed by the mixing valves. The integration only needs to know its value.
-- **Learning (planned):** each room's losses, sun exposure and recurring gains, learned from its own data.
+- **Learning:** each room's steady demand and, with a PV installation as the sun signal, what the sun does to it at each hour. Losses and recurring gains are planned.
 
 ## How it works
 
@@ -41,15 +41,24 @@ Keep it within about 2 °C of the real value. In simulation that barely changes 
 
 If a room stays at 100% and below its target, the water cannot deliver enough heat for it. The integration cannot fix that, so the temperature has to be raised by hand, on the valves and in the setting.
 
+### Outdoor and PV sensors
+
+These are shared by all rooms too, and set on the **What the Heat** page or with the service `what_the_heat.set_sensors`. Neither is required.
+
+- **Outdoor temperature:** only logged for now, for learning later.
+- **PV power:** the current power of a PV installation, in W or kW. It is the sun signal described below. Use one read locally, since a cloud service may stop for hours.
+
 ### What a room learns so far
 
-One thing: its steady demand, meaning how much of the time the valve must be open to hold the target. The controller works this out while it is in charge. Before that, the integration watches how much the thermostat heats on its own. The value appears after about 6 hours of data near the target, as the **Learned demand** sensor and on the **What the Heat** page.
+**Steady demand:** how much of the time the valve must be open to hold the target. The controller works this out while it is in charge. Before that, the integration watches how much the thermostat heats on its own. The value appears after about 6 hours of data near the target, as the **Learned demand** sensor and on the **What the Heat** page.
 
-**Reset learning** clears this when something unusual has misled the controller. The mode, the target and the daily measurements stay. The room needs time to learn again, so expect a temporary dip while the valve stays closed for longer. In simulated rooms the lowest temperature fell by 0.5 to 1.5 °C in most cases, and the room spent up to about half a day outside ±0.3 °C, or about 2.5 days in the slowest case.
+**The sun:** with a PV sensor set, each room in Active mode learns, for every hour of the day, how much less heat it needs while the sun shines. If the room was above its target 2 hours after a sunny hour, that hour asks for less heat the next time the sun shines, and the other way round. After 3 sunny days it starts acting: while the panels see the sun, the valve opens less, in proportion to the PV power compared with the highest seen lately. The panels often see the sun well before the room shows it, so heating that the sun would make unnecessary is left out in advance. It never makes the valve open more. The **Sun correction** sensor shows how much it takes off the valve opening now. In simulated sunny rooms this cut the time above the band by about 30%, at the cost of slightly cooler mornings. It has not yet been measured in a real room.
+
+**Reset learning** clears both when something unusual has misled the controller. The mode, the target and the daily measurements stay. The room needs time to learn again, so expect a temporary dip while the valve stays closed for longer. In simulated rooms the lowest temperature fell by 0.5 to 1.5 °C in most cases, and the room spent up to about half a day outside ±0.3 °C, or about 2.5 days in the slowest case.
 
 ### Not there yet
 
-Prediction from the weather forecast and the rest of per-room learning, such as losses, sun exposure and recurring gains, are designed and simulated, but not implemented. See the [specification](docs/specification.md).
+Prediction from the weather forecast and the rest of per-room learning, such as losses and recurring gains, are designed and simulated, but not implemented. See the [specification](docs/specification.md).
 
 ### Where to see it
 
@@ -60,7 +69,7 @@ Prediction from the weather forecast and the rest of per-room learning, such as 
 
 ## Status
 
-Early development, ready for a first test on one room. So far it has PI control and valve cycles only, without prediction, and it learns only each room's steady demand. It runs on a real thermostat in a first test, and has otherwise been tested against simulated rooms and a stand-in thermostat. Figures in the specification come from simulations with assumed room data and have not been verified in a real house.
+Early development, ready for a first test on one room. So far it has PI control and valve cycles, and it learns each room's steady demand and, with PV, what the sun does to it. Prediction from the weather forecast is not there yet. It runs on a real thermostat in a first test, and has otherwise been tested against simulated rooms and a stand-in thermostat. Figures in the specification come from simulations with assumed room data and have not been verified in a real house.
 
 - [Pilot test](docs/pilot-test.md): installation and how to run the test.
 - [Specification](docs/specification.md): requirements, architecture, parameters, simulation results and the roadmap.
@@ -75,6 +84,10 @@ python -m unittest discover -s tests -t .
 
 ```bash
 python -m tests.simulation.pilot
+```
+
+```bash
+python -m tests.simulation.sun
 ```
 
 The integration tests run against a real Home Assistant core and need Python 3.14 and the packages in `requirements_test.txt`:

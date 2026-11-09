@@ -61,6 +61,20 @@
     .summary .water .water-value { min-width: 96px; text-align: center; }
     .summary .water b { font-size: 18px; }
     @media (max-width: 520px) { .summary .water { margin-left: 0; width: 100%; justify-content: space-between; } }
+    .sensors { display: grid; gap: 12px 24px; grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr)); padding: 12px 16px; margin-bottom: 16px; }
+    .sensors label { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+    .sensors span, .sensors small { font-size: 12px; color: var(--secondary-text-color, #666); }
+    select {
+      width: 100%;
+      min-height: 40px;
+      padding: 4px 8px;
+      font: inherit;
+      color: inherit;
+      background: var(--card-background-color, #fff);
+      border: 1px solid var(--divider-color, #e0e0e0);
+      border-radius: 8px;
+    }
+    select:focus-visible { outline: 2px solid var(--primary-color, #03a9f4); outline-offset: 1px; }
     .rooms { display: grid; gap: 16px; grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr)); }
     .room { display: flex; flex-direction: column; gap: 12px; padding: 16px; min-width: 0; }
     .room.problem { border-color: var(--error-color, #db4437); }
@@ -135,11 +149,15 @@
       this.attachShadow({ mode: "open" });
       this._signature = null;
       this._pending = null;
+      this._settings = null;
+      this._settingsAsked = false;
       this.shadowRoot.addEventListener("click", (event) => this._onClick(event));
+      this.shadowRoot.addEventListener("change", (event) => this._onChange(event));
     }
 
     set hass(hass) {
       this._hass = hass;
+      if (!this._settingsAsked) this._loadSettings();
       this._update();
     }
 
@@ -191,11 +209,35 @@
       return value.toLocaleString(language, { minimumFractionDigits: digits, maximumFractionDigits: digits });
     }
 
+    // The settings shared by all rooms come from the integration itself, not from an entity.
+    _loadSettings() {
+      this._settingsAsked = true;
+      if (!this._hass.callWS) return;
+      this._hass.callWS({ type: `${PLATFORM}/settings` }).then(
+        (settings) => {
+          this._settings = settings;
+          this._update();
+        },
+        () => {
+          this._settingsAsked = false;
+        },
+      );
+    }
+
+    _sensorOptions(deviceClass) {
+      return Object.entries(this._hass.states)
+        .filter(([entityId, state]) => entityId.startsWith("sensor.") && (state.attributes || {}).device_class === deviceClass)
+        .map(([entityId, state]) => [entityId, state.attributes.friendly_name || entityId])
+        .sort((a, b) => a[1].localeCompare(b[1]));
+    }
+
     _update() {
       if (!this._hass) return;
       const rooms = this._rooms();
       const signature = JSON.stringify([
         this._pending,
+        this._settings,
+        this._settings ? [this._sensorOptions("temperature"), this._sensorOptions("power")] : null,
         rooms.map((room) => [room.name, room.area, Object.values(room.entities).map((id) => (this._hass.states[id] || {}).last_updated)]),
       ]);
       if (signature === this._signature) return;
@@ -208,7 +250,7 @@
       this.shadowRoot.innerHTML = `
         <style>${STYLE}</style>
         <header>${menu}<h1>What the Heat</h1>${VERSION ? `<span class="version">${escapeHtml(VERSION)}</span>` : ""}</header>
-        <main>${rooms.length ? this._summary(rooms) + `<div class="rooms">${rooms.map((room) => this._room(room)).join("")}</div>` : this._empty()}</main>
+        <main>${rooms.length ? this._summary(rooms) + this._sensors() + `<div class="rooms">${rooms.map((room) => this._room(room)).join("")}</div>` : this._empty()}</main>
       `;
       const button = this.shadowRoot.querySelector("ha-menu-button");
       if (button) {
@@ -235,6 +277,23 @@
           <button class="step" data-action="water" data-delta="0.5" aria-label="Raise the water temperature">+</button>
         </div>`;
       return `<div class="card summary">${item(rooms.length, "Rooms")}${item(heating, "Heating now")}${item(active, "Controlled")}${item(problems, "Problems", problems > 0)}${control}</div>`;
+    }
+
+    _sensors() {
+      if (!this._settings) return "";
+      const choice = (key, label, deviceClass, note) => {
+        const current = this._settings[key] || "";
+        const options = this._sensorOptions(deviceClass);
+        if (current && !options.some(([id]) => id === current)) options.unshift([current, current]);
+        const items = options.map(([id, name]) => `<option value="${escapeHtml(id)}" ${id === current ? "selected" : ""}>${escapeHtml(name)}</option>`);
+        return `
+          <label>
+            <span>${label}, all rooms</span>
+            <select data-setting="${key}"><option value="" ${current ? "" : "selected"}>None</option>${items.join("")}</select>
+            <small>${note}</small>
+          </label>`;
+      };
+      return `<div class="card sensors">${choice("outdoor_entity", "Outdoor temperature", "temperature", "Only logged for now, for learning later.")}${choice("pv_entity", "PV power", "power", "Tells each room how much sun there is, so that it can learn what the sun does to it.")}</div>`;
     }
 
     _room(room) {
@@ -283,6 +342,7 @@
             ${today("longest_closed_today", "Longest off", 1, " h")}
           </div>
           ${this._learned(room, name)}
+          ${this._sun(room)}
           <div class="modes" role="group" aria-label="Mode of ${name}">${MODES.map(([value, label]) => this._modeButton(room, mode, value, label)).join("")}</div>
           <p class="note">${MODE_NOTES[mode] || ""}</p>
           <div class="foot">
@@ -305,6 +365,17 @@
         ? `<button class="${confirming ? "confirm" : ""}" data-action="reset" data-room="${room.id}" aria-label="Reset what ${name} has learned">${confirming ? "Confirm?" : "Reset learning"}</button>`
         : "";
       return `<div class="learned"><div><b>${demand === null ? "–" : demand + "%"}</b><span>${label}</span></div>${reset}</div>`;
+    }
+
+    // Shown only while a PV sensor is set.
+    _sun(room) {
+      const state = this._state(room, "sun_correction");
+      if (!state || UNUSABLE.has(state.state)) return "";
+      const { sunny_days: days = 0, active = false } = state.attributes;
+      const correction = this._number(room, "sun_correction");
+      const sunnyDays = `${days} sunny ${days === 1 ? "day" : "days"}`;
+      const label = active ? `Valve opening the sun takes off now, learned from ${sunnyDays}` : `Learning what the sun does here, from ${sunnyDays} so far`;
+      return `<div class="learned"><div><b>${active && correction !== null ? correction + "%" : "–"}</b><span>${label}</span></div></div>`;
     }
 
     _duration(hours) {
@@ -330,6 +401,14 @@
       if (button.dataset.action === "target") this._changeTarget(room, Number(button.dataset.delta));
       else if (button.dataset.action === "reset") this._resetLearning(room);
       else this._changeMode(room, button.dataset.mode);
+    }
+
+    _onChange(event) {
+      const select = event.target.closest("select[data-setting]");
+      if (!select) return;
+      const key = select.dataset.setting;
+      this._settings = { ...this._settings, [key]: select.value || null };
+      Promise.resolve(this._hass.callService(PLATFORM, "set_sensors", { [key]: select.value })).finally(() => this._loadSettings());
     }
 
     _changeWater(delta) {

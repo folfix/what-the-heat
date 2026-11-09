@@ -47,6 +47,19 @@ class DailyLogTest(unittest.TestCase):
         self.assertIsNone(today["heating_pct"])
         self.assertIsNone(today["outdoor_mean"])
 
+    def test_pv_energy_and_the_sun_correction(self) -> None:
+        log = DailyLog()
+        log.add("2026-11-08", HOUR, target=23.0, pv_w=6000.0, sun=-40.0)
+        log.add("2026-11-08", HOUR, target=23.0, pv_w=0.0, sun=0.0)
+        today = log.today
+        self.assertEqual(today["pv_kwh"], 6.0)
+        self.assertEqual(today["sun_correction_pct"], -20.0)
+
+    def test_without_pv_there_is_no_energy(self) -> None:
+        log = DailyLog()
+        log.add("2026-11-08", HOUR, target=23.0)
+        self.assertIsNone(log.today["pv_kwh"])
+
     def test_new_date_closes_the_row(self) -> None:
         log = DailyLog()
         log.add("2026-11-05", HOUR, target=21.0, temperature=21.0, writes=3)

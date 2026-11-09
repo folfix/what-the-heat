@@ -4,7 +4,7 @@ How to run the first real test on one closed room. Background and criteria are i
 
 ## What runs in this test
 
-Only PID and cycles, with no prediction. The only thing learned is each room's steady demand. The integration writes only to the room's thermostat, and only in `Active` mode. It neither reads nor changes the mixing valves, the buffer or the heat pump.
+Only PID and cycles, with no prediction from the forecast. Each room learns its steady demand and, with a PV sensor, what the sun does to it at each hour. The integration writes only to the room's thermostat, and only in `Active` mode. It neither reads nor changes the mixing valves, the buffer or the heat pump.
 
 ## 1. Install
 
@@ -23,12 +23,15 @@ Restart Home Assistant in both cases.
 | Room name | Any name. It becomes part of the entity names. |
 | Thermostat | The room's `climate` entity |
 | Target temperature | 21 |
-| Outdoor temperature sensor | The outdoor sensor. It is only logged for now. |
 | Delay of the first cycle | 0 |
 
 A new room starts in **Observe** mode. It writes nothing to the thermostat, so this step is safe.
 
-Then open the **What the Heat** page in the sidebar and set the water temperature to what the mixing valves are set to. It is shared by all rooms, and the default is 30 °C.
+Then open the **What the Heat** page in the sidebar. These settings are shared by all rooms:
+
+- **Water temperature:** what the mixing valves are set to. The default is 30 °C.
+- **Outdoor temperature:** the outdoor sensor. It is only logged for now.
+- **PV power:** the power of a PV installation, if there is one, preferably read locally. Each room then learns what the sun does to it.
 
 ## 3. Baseline
 
@@ -61,12 +64,13 @@ The **What the Heat** page in the sidebar shows the main values for all rooms, a
 | Heating today | Share of the day the relay was on |
 | Duty | The share of time the valve should be open |
 | Learned demand | The share of time the valve needs to be open to hold the target at the current water temperature. Empty until there are about 6 hours of data near the target. The attributes say how much data is behind it and where it comes from. |
+| Sun correction | How much the sun takes off the duty right now, with a PV sensor set. It stays at 0 until the room has learned from 3 sunny days, which the `sunny_days` attribute counts. `sun_pct` is the PV power as a share of the highest seen lately. |
 | Valve requested | What the controller wants right now |
 | Setpoint writes | Total number of writes to the thermostat |
 | Resent commands | Commands sent again by the watchdog |
 | Problem | On when something needs attention. The `reasons` attribute says what. |
 
-If something unusual has misled the controller, such as a long open window, use **Reset learning**, as a button on the device page or on the **What the Heat** page, where a second click confirms it. It clears the learned demand and keeps the mode, the target and the daily measurements. Expect the room to dip for a while as the controller learns again, so note the moment when comparing results.
+If something unusual has misled the controller, such as a long open window, use **Reset learning**, as a button on the device page or on the **What the Heat** page, where a second click confirms it. It clears the learned demand and what the room learned about the sun, and keeps the mode, the target and the daily measurements. Expect the room to dip for a while as the controller learns again, so note the moment when comparing results.
 
 ## 6. Stopping
 
@@ -76,7 +80,7 @@ If Home Assistant stops, the thermostat keeps its last setpoint, so the room slo
 
 ## 7. Collecting results
 
-On the device page, use **Download diagnostics**. The file contains the settings and one row per day, including comfort metrics, heating share, mean temperatures and writes. `active_pct` tells baseline days and controlled days apart.
+On the device page, use **Download diagnostics**. The file contains the settings and one row per day, including comfort metrics, heating share, mean temperatures, writes, the day's PV energy and the mean sun correction. `active_pct` tells baseline days and controlled days apart. What the room learned about the sun is under `runner` and `learned`.
 
 ## 8. Logs
 

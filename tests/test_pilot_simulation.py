@@ -89,6 +89,30 @@ class PilotRoomTest(unittest.TestCase):
                     result = simulate(parameters, environment, TARGET, assumed_water=34.0 + error, days=21.0, settle_days=7.0)
                     self.assertGreaterEqual(result.within_band_pct, 90.0)
 
+    def test_pv_profile_lowers_the_overheating_by_the_sun(self) -> None:
+        for label in ("reference", "light room"):
+            with self.subTest(room=label):
+                parameters, ground = ROOMS[label]
+                environment = Environment(water_setpoint=34.0, ground=ground, sun_peak_w=1500.0)
+                run = {"days": 21.0, "settle_days": 7.0}
+                without = simulate(parameters, environment, TARGET, **run)
+                learned = simulate(parameters, environment, TARGET, use_pv=True, **run)
+                self.assertLess(learned.above_band_kh_per_day, 0.9 * without.above_band_kh_per_day)
+                self.assertLess(learned.rms, without.rms)
+                # Closing earlier costs a cooler morning, but hardly any time below the band.
+                self.assertLess(learned.below_band_kh_per_day, without.below_band_kh_per_day + 0.05)
+                self.assertGreater(learned.low, TARGET - 0.4)
+
+    def test_pv_profile_does_no_harm_where_the_sun_does_not_reach(self) -> None:
+        for label, (parameters, ground) in ROOMS.items():
+            with self.subTest(room=label):
+                environment = Environment(water_setpoint=34.0, ground=ground)
+                run = {"days": 21.0, "settle_days": 7.0}
+                without = simulate(parameters, environment, TARGET, **run)
+                learned = simulate(parameters, environment, TARGET, use_pv=True, **run)
+                self.assertLess(learned.rms, without.rms + 0.02)
+                self.assertGreater(learned.low, without.low - 0.1)
+
     def test_unreachable_target_saturates_without_alarm_from_the_watchdog(self) -> None:
         parameters, ground = ROOMS["high losses"]
         result = simulate(parameters, Environment(water_setpoint=30.0, ground=ground), TARGET)

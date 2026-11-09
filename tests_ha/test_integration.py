@@ -40,6 +40,8 @@ THERMOSTAT = "climate.pilot_thermostat"
 ROOM = "climate.pilot"
 HEAT_PUMP = "climate.heat_pump"
 OUTDOOR = "sensor.outdoor"
+PV = "sensor.pv_power"
+SUN = "sensor.pilot_sun_correction"
 MODE = "select.pilot_mode"
 TARGET = "number.pilot_target"
 DUTY = "sensor.pilot_duty"
@@ -117,6 +119,15 @@ async def set_water(hass: HomeAssistant, temperature: float) -> None:
     await hass.async_block_till_done()
 
 
+async def set_sensors(hass: HomeAssistant, **sensors: str) -> None:
+    await hass.services.async_call(DOMAIN, "set_sensors", sensors, blocking=True)
+    await hass.async_block_till_done()
+
+
+def store_settings(hass_storage, **data) -> None:
+    hass_storage[f"{DOMAIN}.settings"] = {"version": 1, "minor_version": 1, "key": f"{DOMAIN}.settings", "data": data}
+
+
 async def tick(hass: HomeAssistant, entry: MockConfigEntry) -> None:
     await entry.runtime_data.async_refresh()
     await hass.async_block_till_done()
@@ -148,18 +159,25 @@ async def test_a_thermostat_can_belong_to_only_one_room(hass: HomeAssistant) -> 
     assert result["reason"] == "already_configured"
 
 
-async def test_options_change_and_can_remove_an_entity(hass: HomeAssistant) -> None:
+async def test_options_change(hass: HomeAssistant) -> None:
     set_thermostat(hass)
-    hass.states.async_set(OUTDOOR, "4.2")
-    entry = await add_room(hass, **{CONF_OUTDOOR_ENTITY: OUTDOOR})
-    assert merged_config(entry)[CONF_OUTDOOR_ENTITY] == OUTDOOR
+    entry = await add_room(hass)
     result = await hass.config_entries.options.async_init(entry.entry_id)
     assert result["type"] is FlowResultType.FORM
     result = await hass.config_entries.options.async_configure(result["flow_id"], {CONF_PHASE_OFFSET: 15})
     assert result["type"] is FlowResultType.CREATE_ENTRY
     await hass.async_block_till_done()
-    assert CONF_OUTDOOR_ENTITY not in merged_config(entry)
     assert merged_config(entry)[CONF_PHASE_OFFSET] == 15
+
+
+async def test_an_outdoor_sensor_set_on_a_room_is_left_out(hass: HomeAssistant) -> None:
+    # Older versions had one per room. It is now shared by all rooms.
+    set_thermostat(hass)
+    hass.states.async_set(OUTDOOR, "4.2")
+    entry = await add_room(hass, **{CONF_OUTDOOR_ENTITY: OUTDOOR})
+    assert CONF_OUTDOOR_ENTITY not in merged_config(entry)
+    result = await async_get_config_entry_diagnostics(hass, entry)
+    assert result["today"]["outdoor_mean"] is None
 
 
 async def test_new_room_observes_and_writes_nothing(hass: HomeAssistant, set_temperature_calls, set_hvac_mode_calls) -> None:
@@ -374,6 +392,69 @@ async def test_water_temperature_stays_within_limits(hass: HomeAssistant) -> Non
         with pytest.raises(vol.Invalid):
             await set_water(hass, value)
     assert float(hass.states.get(WATER).state) == 30.0
+
+
+async def test_shared_sensors_are_saved_and_can_be_removed(hass: HomeAssistant, hass_storage) -> None:
+    set_thermostat(hass)
+    await add_room(hass)
+    await set_sensors(hass, outdoor_entity=OUTDOOR, pv_entity=PV)
+    saved = hass_storage[f"{DOMAIN}.settings"]["data"]
+    assert (saved["outdoor_entity"], saved["pv_entity"]) == (OUTDOOR, PV)
+    await set_sensors(hass, pv_entity="")
+    saved = hass_storage[f"{DOMAIN}.settings"]["data"]
+    assert (saved["outdoor_entity"], saved["pv_entity"]) == (OUTDOOR, None)
+
+
+async def test_the_page_reads_the_shared_settings(hass: HomeAssistant, hass_ws_client) -> None:
+    set_thermostat(hass)
+    await add_room(hass)
+    await set_sensors(hass, pv_entity=PV)
+    client = await hass_ws_client(hass)
+    await client.send_json({"id": 1, "type": f"{DOMAIN}/settings"})
+    response = await client.receive_json()
+    assert response["success"]
+    assert response["result"] == {"water_temperature": 30.0, "outdoor_entity": None, "pv_entity": PV}
+
+
+async def test_without_pv_there_is_no_sun_correction(hass: HomeAssistant) -> None:
+    set_thermostat(hass)
+    await add_room(hass)
+    assert hass.states.get(SUN).state == "unknown"
+
+
+async def test_pv_power_becomes_a_share_of_full_sun_in_any_unit(hass: HomeAssistant) -> None:
+    set_thermostat(hass)
+    entry = await add_room(hass)
+    hass.states.async_set(PV, "4.0", {"unit_of_measurement": "kW", "device_class": "power"})
+    await set_sensors(hass, pv_entity=PV)
+    assert hass.states.get(SUN).attributes["sun_pct"] == 100.0
+    hass.states.async_set(PV, "1000", {"unit_of_measurement": "W", "device_class": "power"})
+    await tick(hass, entry)
+    state = hass.states.get(SUN)
+    assert state.attributes["sun_pct"] == 25.0
+    # Nothing has been learned about the sun yet, so it changes nothing.
+    assert float(state.state) == 0.0
+    assert (state.attributes["sunny_days"], state.attributes["active"]) == (0, False)
+
+
+async def test_what_a_room_learned_about_the_sun_is_restored_and_used(hass: HomeAssistant, hass_storage, set_temperature_calls) -> None:
+    set_thermostat(hass, temperature=21.0, setpoint=24.0, action="heating")
+    hass.states.async_set(PV, "4000", {"unit_of_measurement": "W", "device_class": "power"})
+    store_settings(hass_storage, pv_entity=PV)
+    entry = room_entry()
+    entry.add_to_hass(hass)
+    hass_storage[f"{DOMAIN}.{entry.entry_id}"] = {
+        "version": 1,
+        "minor_version": 1,
+        "key": f"{DOMAIN}.{entry.entry_id}",
+        "data": {"runner": {"mode": "active", "target": 21.0, "integral": 30.0, "solar": {"values": [40.0] * 24, "sunny_days": 4}}},
+    }
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    state = hass.states.get(SUN)
+    assert (state.attributes["sunny_days"], state.attributes["active"]) == (4, True)
+    assert float(state.state) < 0.0
+    assert entry.runtime_data.runner.snapshot()["solar"]["values"] == [40.0] * 24
 
 
 async def test_heat_pump_is_neither_read_nor_changed(hass: HomeAssistant, set_temperature_calls) -> None:
@@ -610,19 +691,25 @@ async def test_reset_while_observing_writes_nothing(hass: HomeAssistant, set_tem
     assert set_temperature_calls == []
 
 
-async def test_diagnostics_contain_the_daily_measurements(hass: HomeAssistant) -> None:
+async def test_diagnostics_contain_the_daily_measurements(hass: HomeAssistant, hass_storage) -> None:
     set_thermostat(hass)
     hass.states.async_set(OUTDOOR, "4.2")
-    entry = await add_room(hass, **{CONF_OUTDOOR_ENTITY: OUTDOOR})
+    hass.states.async_set(PV, "3600", {"unit_of_measurement": "W", "device_class": "power"})
+    store_settings(hass_storage, outdoor_entity=OUTDOOR, pv_entity=PV)
+    entry = await add_room(hass)
     await asyncio.sleep(0.01)
     await tick(hass, entry)
     result = await async_get_config_entry_diagnostics(hass, entry)
     assert result["config"][CONF_THERMOSTAT] == THERMOSTAT
+    assert result["shared"]["outdoor_entity"] == OUTDOOR
+    assert result["shared"]["sun"]["reference_w"] == 3600.0
     assert result["runner"]["mode"] == "observe"
     assert result["learned"]["source"] == "thermostat"
+    assert result["learned"]["sunny_days"] == 0
     assert result["today"]["date"] == dt_util.now().date().isoformat()
     assert result["today"]["outdoor_mean"] == 4.2
     assert result["today"]["water_mean"] == 30.0
+    assert result["today"]["pv_kwh"] is not None
     assert result["days"] == []
 
 

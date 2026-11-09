@@ -12,6 +12,7 @@ A Home Assistant custom integration for water-based underfloor heating. Requirem
 
 - Core and simulation tests: `python -m unittest discover -s tests -t .`
 - Pilot room comparison: `python -m tests.simulation.pilot`
+- Sun handling comparison: `python -m tests.simulation.sun`
 - Sidebar page with made-up rooms: run `python -m http.server 8765` in the repository root and open `/tests_ha/panel_preview.html`.
 - Integration tests on a real Home Assistant core: `python -m pytest` in an environment with `requirements_test.txt`. On Windows that environment also needs stand-ins for the Unix modules `fcntl` and `resource`.
 

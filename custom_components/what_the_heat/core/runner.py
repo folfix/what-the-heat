@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 from .smoothing import ExponentialFilter
+from .sun import SolarConfig, SolarProfile
 from .valve import ValveWatchdog, WatchdogConfig, WatchdogResult
 from .zone import ZoneConfig, ZoneController, ZoneDecision, ZoneStatus
 
@@ -70,6 +71,7 @@ class RunnerConfig:
 
     zone: ZoneConfig = field(default_factory=ZoneConfig)
     watchdog: WatchdogConfig = field(default_factory=WatchdogConfig)
+    sun: SolarConfig = field(default_factory=SolarConfig)
     heat_mode_retry_s: float = 5 * 60.0
     heat_mode_attempts: int = 3
     heating_share_time_constant_s: float = 24 * 3600.0
@@ -86,12 +88,17 @@ class LearnedState:
     where it comes from: "controller" while it is in charge, otherwise "thermostat", from
     what the thermostat has been doing on its own. `hours` is how much data is behind it,
     and `recent_heating` the percentage of about the last day that the relay was on.
+    `sun_profile` holds, for each hour, how much less heat the room needs at full sun,
+    learned from `sunny_days` days. It acts once `sun_active` is set.
     """
 
     demand: float | None
     source: str
     hours: float
     recent_heating: float | None
+    sunny_days: int
+    sun_active: bool
+    sun_profile: tuple[float, ...]
 
 
 @dataclass(frozen=True)
@@ -114,6 +121,9 @@ class ZoneRunner:
     starts from how much the thermostat has recently been heating, but only if the room
     is near its target. A room that is cold or was just warming up says nothing about its
     steady demand, so it starts from zero.
+
+    With a share of full sun from PV, the room learns what the sun does to it while in
+    active mode, and once it has learned enough, opens the valve less while the sun shines.
     """
 
     def __init__(
@@ -127,6 +137,7 @@ class ZoneRunner:
         observed_s: float = 0.0,
         writes: int = 0,
         learned_s: float = 0.0,
+        solar: dict | None = None,
     ) -> None:
         self._config = config or RunnerConfig()
         self._mode = mode
@@ -135,6 +146,7 @@ class ZoneRunner:
         self._heating_share = ExponentialFilter(self._config.heating_share_time_constant_s)
         if heating_share is not None:
             self._heating_share.update(heating_share, 0.0)
+        self._solar = SolarProfile(self._config.sun, **(solar or {}))
         self._observed_s = observed_s
         self._learned_s = learned_s
         self._writes = writes
@@ -180,6 +192,7 @@ class ZoneRunner:
     def reset_learning(self) -> None:
         """Forget what was learned about the room. The mode, target and counters stay."""
         self._controller.reset_learning()
+        self._solar.reset()
         self._heating_share.reset()
         self._observed_s = 0.0
         self._learned_s = 0.0
@@ -197,9 +210,18 @@ class ZoneRunner:
         if integral is not None and seconds >= config.min_learning_s:
             scale = self._controller.gain_scale(self._controller.target, self._last_water)
             demand = min(100.0, integral * scale)
-        return LearnedState(demand, source, seconds / 3600.0, recent)
+        solar = self._solar
+        return LearnedState(
+            demand,
+            source,
+            seconds / 3600.0,
+            recent,
+            solar.sunny_days,
+            solar.active,
+            solar.values,
+        )
 
-    def snapshot(self) -> dict[str, float | str | None]:
+    def snapshot(self) -> dict:
         """Return the state worth keeping across a restart."""
         return {
             "mode": self._mode.value,
@@ -208,6 +230,7 @@ class ZoneRunner:
             "observed_s": self._observed_s,
             "learned_s": self._learned_s,
             "writes": self._writes,
+            "solar": self._solar.snapshot(),
             **self._controller.snapshot(),
         }
 
@@ -216,16 +239,28 @@ class ZoneRunner:
         now_s: float,
         reading: ThermostatReading,
         water_temperature: float | None = None,
+        sun: float | None = None,
+        date: str | None = None,
+        hour: int | None = None,
     ) -> RunnerStep:
-        """Advance by one step and return what should be done."""
+        """Advance by one step and return what should be done.
+
+        `sun` is the share of full sun from PV, and `date` and `hour` the local date and
+        hour of the day, which the room needs to learn what the sun does at each hour.
+        """
         dt_s = 0.0 if self._last_step_s is None else now_s - self._last_step_s
         self._last_step_s = now_s
         writes_before = self._writes
+        feedforward = 0.0 if hour is None else self._solar.feedforward(hour, sun)
         self._controller.set_device_limits(reading.min_temp, reading.max_temp, reading.setpoint_step)
-        decision = self._controller.step(now_s, reading.temperature, water_temperature)
+        decision = self._controller.step(now_s, reading.temperature, water_temperature, feedforward)
         self._track_heating(reading, water_temperature, dt_s)
+        step_s = min(dt_s, self._config.zone.max_integration_step_s)
         if self._mode is Mode.ACTIVE and decision.learning:
-            self._learned_s += min(dt_s, self._config.zone.max_integration_step_s)
+            self._learned_s += step_s
+        if self._mode is Mode.ACTIVE and date is not None and hour is not None:
+            deviation = None if reading.temperature is None or decision.temperature is None else decision.temperature - self.target
+            self._solar.add(date, hour, step_s, sun, deviation)
 
         problems: set[Problem] = set()
         if decision.status in (ZoneStatus.DEGRADED, ZoneStatus.HANDBACK):

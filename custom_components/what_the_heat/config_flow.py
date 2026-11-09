@@ -20,7 +20,6 @@ from homeassistant.helpers.selector import (
 )
 
 from .const import (
-    CONF_OUTDOOR_ENTITY,
     CONF_PHASE_OFFSET,
     CONF_TARGET,
     CONF_THERMOSTAT,
@@ -34,7 +33,6 @@ from .const import (
 from .coordinator import merged_config
 
 SETTINGS_FIELDS = {
-    vol.Optional(CONF_OUTDOOR_ENTITY): EntitySelector(EntitySelectorConfig(domain="sensor")),
     vol.Required(CONF_PHASE_OFFSET, default=DEFAULT_PHASE_OFFSET): NumberSelector(
         NumberSelectorConfig(
             min=0,

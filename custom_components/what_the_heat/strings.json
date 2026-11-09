@@ -9,16 +9,14 @@
     "step": {
       "user": {
         "title": "Add a room",
-        "description": "A new room starts in observe mode: it calculates and logs, and writes nothing to the thermostat until you select active mode. The water temperature is shared by all rooms and is set on the What the Heat page.",
+        "description": "A new room starts in observe mode: it calculates and logs, and writes nothing to the thermostat until you select active mode. The water temperature and the outdoor and PV sensors are shared by all rooms and are set on the What the Heat page.",
         "data": {
           "name": "Room name",
           "thermostat": "Thermostat",
           "target": "Target temperature",
-          "outdoor_entity": "Outdoor temperature sensor",
           "phase_offset": "Delay of the first cycle"
         },
         "data_description": {
-          "outdoor_entity": "Only logged for now, for learning later.",
           "phase_offset": "Set different values for different rooms, so that they do not all open together."
         }
       }
@@ -29,11 +27,9 @@
       "init": {
         "title": "Room settings",
         "data": {
-          "outdoor_entity": "Outdoor temperature sensor",
           "phase_offset": "Delay of the first cycle"
         },
         "data_description": {
-          "outdoor_entity": "Only logged for now, for learning later.",
           "phase_offset": "Set different values for different rooms, so that they do not all open together."
         }
       }
@@ -47,6 +43,20 @@
         "temperature": {
           "name": "Temperature",
           "description": "The temperature set on the mixing valves."
+        }
+      }
+    },
+    "set_sensors": {
+      "name": "Set sensors",
+      "description": "Sets the outdoor temperature and PV power sensors shared by all rooms. A sensor left out stays as it is, and an empty one is removed.",
+      "fields": {
+        "outdoor_entity": {
+          "name": "Outdoor temperature sensor",
+          "description": "Only logged for now, for learning later."
+        },
+        "pv_entity": {
+          "name": "PV power sensor",
+          "description": "The current power of the PV installation. It tells each room how much sun there is, so that the room can learn what the sun does to it."
         }
       }
     }
@@ -103,6 +113,7 @@
       "heating_today": { "name": "Heating today" },
       "longest_closed_today": { "name": "Longest closed today" },
       "learned_demand": { "name": "Learned demand" },
+      "sun_correction": { "name": "Sun correction" },
       "integral": { "name": "Integral" },
       "water_temperature": { "name": "Water temperature" },
       "setpoint_writes": { "name": "Setpoint writes" },

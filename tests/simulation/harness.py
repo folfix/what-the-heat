@@ -14,6 +14,7 @@ from custom_components.what_the_heat.core.runner import (
     ThermostatReading,
     ZoneRunner,
 )
+from custom_components.what_the_heat.core.sun import SolarConfig
 from custom_components.what_the_heat.core.valve import WatchdogConfig
 from custom_components.what_the_heat.core.zone import ZoneConfig, ZoneStatus
 
@@ -23,9 +24,20 @@ STEP_S = 60.0
 DAY_S = 86400.0
 
 
+def _arch(hour: float, start: float, end: float) -> float:
+    """Return a half sine from start to end, peaking at 1 in the middle."""
+    if not start < hour < end:
+        return 0.0
+    return math.sin(math.pi * (hour - start) / (end - start))
+
+
 @dataclass(frozen=True)
 class Environment:
-    """Conditions around the room. The real water moves around the setpoint the controller assumes."""
+    """Conditions around the room. The real water moves around the setpoint the controller assumes.
+
+    The sun reaches the PV panels earlier than the room's windows, as in the pilot house
+    in November, and each day has its own share of full sun, repeating.
+    """
 
     water_setpoint: float = 34.0
     water_ripple: float = 1.5
@@ -36,10 +48,25 @@ class Environment:
     outdoor_mean: float = 3.0
     outdoor_swing: float = 3.0
     ground: float = 11.0
+    sun_peak_w: float = 0.0
+    sun_hours: tuple[float, float] = (9.3, 16.3)
+    pv_hours: tuple[float, float] = (7.5, 15.5)
+    clear_days: tuple[float, ...] = (1.0,)
 
     def outdoor(self, now_s: float) -> float:
         hour = (now_s / 3600.0) % 24.0
         return self.outdoor_mean + self.outdoor_swing * math.sin(2.0 * math.pi * (hour - 9.0) / 24.0)
+
+    def clearness(self, now_s: float) -> float:
+        return self.clear_days[int(now_s // DAY_S) % len(self.clear_days)]
+
+    def sun(self, now_s: float) -> float:
+        """Return the sun coming through the windows, in watts."""
+        return self.sun_peak_w * self.clearness(now_s) * _arch((now_s / 3600.0) % 24.0, *self.sun_hours)
+
+    def pv(self, now_s: float) -> float:
+        """Return the share of full sun the PV panels see."""
+        return self.clearness(now_s) * _arch((now_s / 3600.0) % 24.0, *self.pv_hours)
 
     def water(self, now_s: float) -> float:
         phase = (now_s / self.water_ripple_period_s) % 1.0
@@ -85,6 +112,8 @@ class Result:
     alerts: int = 0
     final_air: float = 0.0
     reached_target_s: float | None = None
+    above_band_kh_per_day: float = 0.0
+    below_band_kh_per_day: float = 0.0
     statuses: set[ZoneStatus] = field(default_factory=set)
 
 
@@ -105,6 +134,8 @@ def simulate(
     observe_days: float = 0.0,
     assumed_water: float | None = None,
     reset_learning_at_s: float | None = None,
+    use_pv: bool = False,
+    sun_config: SolarConfig | None = None,
 ) -> Result:
     """Run the room and return what happened after the settling period.
 
@@ -112,7 +143,7 @@ def simulate(
     observe mode, and the runner then takes over. In that case settle_days counts from
     the takeover. With assumed_water the controller believes in a water temperature
     other than the real setpoint. With reset_learning_at_s the owner presses the reset
-    button at that moment.
+    button at that moment. With use_pv the controller sees the PV share of full sun.
     """
     faults = faults or Faults()
     rng = random.Random(faults.seed)
@@ -127,6 +158,7 @@ def simulate(
     config = RunnerConfig(
         zone=zone_config or ZoneConfig(target=target),
         watchdog=WatchdogConfig(differential=thermostat.differential),
+        sun=sun_config or SolarConfig(),
     )
     runner = None
     if use_controller:
@@ -169,6 +201,9 @@ def simulate(
                     hvac_modes=("off", "heat"),
                 ),
                 environment.water_setpoint if assumed_water is None else assumed_water,
+                sun=environment.pv(now_s) if use_pv else None,
+                date=str(int(now_s // DAY_S)),
+                hour=int((now_s / 3600.0) % 24.0),
             )
             result.statuses.add(step.decision.status)
             result.resends = step.resends
@@ -183,7 +218,7 @@ def simulate(
                 result.wrong_setpoint_s += STEP_S
         relay = thermostat.step(air)
         flow = actuator.step(STEP_S, relay)
-        room.step(STEP_S, flow, environment.water(now_s), environment.outdoor(now_s), environment.ground)
+        room.step(STEP_S, flow, environment.water(now_s), environment.outdoor(now_s), environment.ground, environment.sun(now_s))
         if result.reached_target_s is None and room.air >= target - band:
             result.reached_target_s = now_s
         if now_s < settle_s:
@@ -203,6 +238,9 @@ def simulate(
     writes = step.writes if runner is not None else 0
     result.within_band_pct = sum(1 for value in samples if abs(value - target) <= band) / count * 100.0
     result.rms = math.sqrt(sum((value - target) ** 2 for value in samples) / count)
+    hours_per_sample = STEP_S / 3600.0
+    result.above_band_kh_per_day = sum(max(0.0, value - target - band) for value in samples) * hours_per_sample / span_days
+    result.below_band_kh_per_day = sum(max(0.0, target - band - value) for value in samples) * hours_per_sample / span_days
     result.low = min(samples)
     result.high = max(samples)
     result.first_days_high = first_days_high

@@ -9,13 +9,16 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
 from .coordinator import merged_config
+from .settings import async_get_settings
 
 
 async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: ConfigEntry) -> dict[str, Any]:
     """Return everything needed to evaluate a room's run."""
     coordinator = entry.runtime_data
+    settings = await async_get_settings(hass)
     return {
         "config": merged_config(entry),
+        "shared": settings.snapshot(),
         "runner": coordinator.runner.snapshot(),
         "learned": asdict(coordinator.runner.learned()),
         "today": coordinator.log.today,

@@ -21,15 +21,22 @@ from homeassistant.components.climate import (
     SERVICE_SET_TEMPERATURE,
 )
 from homeassistant.components.climate import DOMAIN as CLIMATE_DOMAIN
-from homeassistant.const import ATTR_ENTITY_ID, ATTR_TEMPERATURE, STATE_UNAVAILABLE, STATE_UNKNOWN
+from homeassistant.const import (
+    ATTR_ENTITY_ID,
+    ATTR_TEMPERATURE,
+    ATTR_UNIT_OF_MEASUREMENT,
+    STATE_UNAVAILABLE,
+    STATE_UNKNOWN,
+    UnitOfPower,
+)
 from homeassistant.core import HomeAssistant, State
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
+from homeassistant.util.unit_conversion import PowerConverter
 
 from .const import (
-    CONF_OUTDOOR_ENTITY,
     CONF_PHASE_OFFSET,
     CONF_TARGET,
     CONF_THERMOSTAT,
@@ -77,6 +84,7 @@ class ZoneData:
     reading: ThermostatReading
     water: float
     outdoor: float | None
+    sun: float | None
     today: dict[str, Any] | None
     learned: LearnedState
 
@@ -84,13 +92,9 @@ class ZoneData:
 def merged_config(entry: ConfigEntry) -> dict[str, Any]:
     """Return the entry's settings, with options replacing the initial values.
 
-    An optional entity removed in the options must stay removed, so it is not taken from
-    the initial data once options exist. Settings from older versions are left out.
+    Settings from older versions are left out.
     """
-    config = dict(entry.data)
-    if entry.options:
-        config.pop(CONF_OUTDOOR_ENTITY, None)
-        config.update(entry.options)
+    config = {**entry.data, **entry.options}
     for key in LEGACY_SETTINGS:
         config.pop(key, None)
     return config
@@ -163,6 +167,7 @@ class ZoneCoordinator(DataUpdateCoordinator[ZoneData]):
             observed_s=state.get("observed_s", 0.0),
             writes=state.get("writes", 0),
             learned_s=state.get("learned_s", 0.0),
+            solar=state.get("solar"),
         )
         self.log = DailyLog(**stored.get("log", {}))
 
@@ -172,14 +177,18 @@ class ZoneCoordinator(DataUpdateCoordinator[ZoneData]):
 
     async def _async_update_data(self) -> ZoneData:
         now_s = dt_util.utcnow().timestamp()
+        local = dt_util.now()
+        date = local.date().isoformat()
         reading = read_thermostat(self.hass.states.get(self._thermostat))
         water = self._global.water_temperature
-        outdoor = self._read_outdoor()
-        step = self.runner.step(now_s, reading, water)
+        outdoor = self._read_number(self._global.outdoor_entity)
+        pv_w = self._read_power(self._global.pv_entity)
+        sun = self._global.sun_share(pv_w, now_s)
+        step = self.runner.step(now_s, reading, water, sun, date, local.hour)
         decision = step.decision
         LOGGER.debug(
-            "%s: mode=%s status=%s room=%s filtered=%s setpoint=%s hvac=%s/%s water=%s "
-            "duty=%.1f integral=%.1f valve_open=%s requested=%s commands=%d",
+            "%s: mode=%s status=%s room=%s filtered=%s setpoint=%s hvac=%s/%s water=%s sun=%s "
+            "duty=%.1f sun_correction=%.1f integral=%.1f valve_open=%s requested=%s commands=%d",
             self._thermostat,
             step.mode.value,
             decision.status.value,
@@ -189,7 +198,9 @@ class ZoneCoordinator(DataUpdateCoordinator[ZoneData]):
             reading.hvac_mode,
             reading.hvac_action,
             water,
+            sun,
             decision.duty,
+            decision.sun,
             decision.integral,
             decision.valve_open,
             decision.setpoint,
@@ -200,7 +211,7 @@ class ZoneCoordinator(DataUpdateCoordinator[ZoneData]):
         dt_s = 0.0 if self._last_step_s is None else min(now_s - self._last_step_s, MAX_LOG_STEP_S)
         self._last_step_s = now_s
         self.log.add(
-            dt_util.now().date().isoformat(),
+            date,
             dt_s,
             target=self.runner.target,
             temperature=reading.temperature,
@@ -209,20 +220,35 @@ class ZoneCoordinator(DataUpdateCoordinator[ZoneData]):
             outdoor=outdoor,
             water=water,
             writes=step.new_writes,
+            pv_w=pv_w,
+            sun=None if sun is None else decision.sun,
         )
         self._update_notification(step.problems)
         # A delayed save restarts its timer on each call, so it is only called when due.
         if now_s - self._last_save_s >= SAVE_INTERVAL_S:
             self._last_save_s = now_s
             self._store.async_delay_save(self.snapshot, 1)
-        return ZoneData(step, reading, water, outdoor, self.log.today, self.runner.learned())
+        return ZoneData(step, reading, water, outdoor, sun, self.log.today, self.runner.learned())
 
-    def _read_outdoor(self) -> float | None:
-        entity = self._config.get(CONF_OUTDOOR_ENTITY)
-        if not entity:
+    def _available_state(self, entity_id: str | None) -> State | None:
+        state = self.hass.states.get(entity_id) if entity_id else None
+        return state if _is_available(state) else None
+
+    def _read_number(self, entity_id: str | None) -> float | None:
+        state = self._available_state(entity_id)
+        return None if state is None else _number(state.state)
+
+    def _read_power(self, entity_id: str | None) -> float | None:
+        """Return the power in watts, whatever unit the sensor reports it in."""
+        state = self._available_state(entity_id)
+        value = None if state is None else _number(state.state)
+        unit = None if state is None else state.attributes.get(ATTR_UNIT_OF_MEASUREMENT)
+        if value is None or unit in (None, UnitOfPower.WATT):
+            return value
+        try:
+            return PowerConverter.convert(value, unit, UnitOfPower.WATT)
+        except HomeAssistantError:
             return None
-        state = self.hass.states.get(entity)
-        return _number(state.state) if _is_available(state) else None
 
     async def _async_execute(self, command: Command) -> None:
         if command.kind is CommandKind.SET_TEMPERATURE:
