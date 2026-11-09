@@ -38,7 +38,7 @@
     { id: "bedroom", name: "A bedroom with a really quite long name that has to wrap", area: "", mode: "active", temp: 20.2, target: 21, action: "idle", duty: 64, band: 41, rms: 0.61, heating: 12, off: 5.4, writes: 47, resends: 6, valve: "off", reasons: ["thermostat_not_following", "readings_missing"], learned: 58, source: "controller", hours: 11, sun: -23, sunnyDays: 4, sunActive: true },
     { id: "hall", name: "Hall", area: "Ground floor", mode: "handback", temp: null, target: 20.5, action: null, duty: null, band: null, rms: null, heating: null, off: null, writes: 2, resends: 0, valve: "off", reasons: [], learned: 22, source: "thermostat", hours: 40, sun: 0, sunnyDays: 0, sunActive: false },
   ];
-  const water = 30;
+  let water = 30;
   const stateOf = (room, key) => {
     const updated = String(Date.now());
     const base = { last_updated: updated, attributes: {} };
@@ -64,6 +64,11 @@
       }
     }
     hass.callService = (domain, service, data) => {
+      if (service === "set_water_temperature") {
+        water = data.temperature;
+        panel.hass = build();
+        return;
+      }
       const room = rooms.find((item) => data.entity_id.includes(`.${item.id}_`));
       if (service === "set_temperature") room.target = data.temperature;
       panel.hass = build();

@@ -16,6 +16,8 @@
     thermostat_cannot_heat: "The thermostat cannot heat. Check its summer mode.",
     readings_missing: "Room temperature readings are missing.",
   };
+  const WATER_MIN = 20;
+  const WATER_MAX = 38;
   const UNUSABLE = new Set(["unavailable", "unknown", undefined]);
 
   const STYLE = `
@@ -49,6 +51,10 @@
     .summary b { display: block; font-size: 22px; font-weight: 500; font-variant-numeric: tabular-nums; }
     .summary span { font-size: 12px; color: var(--secondary-text-color, #666); }
     .summary .alert b { color: var(--error-color, #db4437); }
+    .summary .water { display: flex; align-items: center; gap: 4px; margin-left: auto; }
+    .summary .water .water-value { min-width: 96px; text-align: center; }
+    .summary .water b { font-size: 18px; }
+    @media (max-width: 520px) { .summary .water { margin-left: 0; width: 100%; justify-content: space-between; } }
     .rooms { display: grid; gap: 16px; grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr)); }
     .room { display: flex; flex-direction: column; gap: 12px; padding: 16px; min-width: 0; }
     .room.problem { border-color: var(--error-color, #db4437); }
@@ -204,9 +210,15 @@
       const active = count((room) => (this._state(room, "mode") || {}).state === "active");
       const problems = count((room) => (this._state(room, "problem") || {}).state === "on");
       const item = (value, label, alert) => `<div class="${alert ? "alert" : ""}"><b>${value}</b><span>${label}</span></div>`;
-      // The water temperature is a shared setting, changed with Configure on the integration.
+      // The water temperature may change over time, so unlike the other shared settings it is set here.
       const water = this._number(rooms[0], "water_temperature", 1);
-      return `<div class="card summary">${item(rooms.length, "Rooms")}${item(heating, "Heating now")}${item(active, "Controlled")}${item(problems, "Problems", problems > 0)}${item(`${water ?? "–"} °C`, "Water, all rooms")}</div>`;
+      const control = `
+        <div class="water" role="group" aria-label="Water temperature for all rooms">
+          <button class="step" data-action="water" data-delta="-0.5" aria-label="Lower the water temperature">−</button>
+          <div class="water-value"><b>${water ?? "–"} °C</b><span>Water, all rooms</span></div>
+          <button class="step" data-action="water" data-delta="0.5" aria-label="Raise the water temperature">+</button>
+        </div>`;
+      return `<div class="card summary">${item(rooms.length, "Rooms")}${item(heating, "Heating now")}${item(active, "Controlled")}${item(problems, "Problems", problems > 0)}${control}</div>`;
     }
 
     _room(room) {
@@ -293,8 +305,20 @@
     _onClick(event) {
       const button = event.target.closest("button[data-action]");
       if (!button) return;
+      if (button.dataset.action === "water") {
+        this._changeWater(Number(button.dataset.delta));
+        return;
+      }
       const room = this._rooms().find((item) => item.id === button.dataset.room);
       if (room) this._changeTarget(room, Number(button.dataset.delta));
+    }
+
+    _changeWater(delta) {
+      const rooms = this._rooms();
+      const state = rooms.length ? this._state(rooms[0], "water_temperature") : undefined;
+      if (!state || UNUSABLE.has(state.state)) return;
+      const next = Math.min(WATER_MAX, Math.max(WATER_MIN, Number(state.state) + delta));
+      this._hass.callService(PLATFORM, "set_water_temperature", { temperature: next });
     }
 
     _changeTarget(room, delta) {

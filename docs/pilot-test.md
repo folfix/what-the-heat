@@ -18,11 +18,10 @@ Restart Home Assistant in both cases.
 
 **Settings → Devices & services → Add integration → What the Heat**
 
-The first time, the form asks for the settings shared by all rooms:
+The first time, the form asks for the sensors shared by all rooms:
 
 | Field | Value |
 |---|---|
-| Water temperature | What the mixing valves are set to. The default is 30 °C. |
 | Outdoor temperature sensor | The outdoor sensor. It is only logged for now. |
 | PV power sensor | The power of a PV installation, if there is one, preferably read locally. Each room then learns what the sun does to it. |
 
@@ -40,6 +39,8 @@ Then add the room with **Add entry**:
 | Delay of the first cycle | 0 |
 
 A new room starts in **Active** mode and takes over the thermostat right away. The thermostat display will alternate between target + 3 °C and target - 3 °C, which is expected.
+
+Then open the **What the Heat** page in the sidebar and set the water temperature to what the mixing valves are set to. It is shared by all rooms, and the default is 30 °C.
 
 ## 3. Baseline
 

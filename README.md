@@ -35,11 +35,11 @@ A room's mode is changed with its **Mode** entity, or with the preset of its the
 
 ### Shared settings
 
-The first time the integration is added, it asks for the settings shared by all rooms, and then each room is added with **Add entry**. These settings rarely change, so they are kept apart from the rooms: change them with **Configure** on the **Shared settings** entry of the integration. Without that entry the rooms use 30 °C water and no sensors.
+The first time the integration is added, it asks for the outdoor and PV sensors shared by all rooms, and then each room is added with **Add entry**. These rarely change, so they are kept apart from the rooms: change them with **Configure** on the **Shared settings** entry of the integration. Without that entry the rooms use no sensors.
 
 ### Water temperature
 
-This is one setting for all rooms, by default 30 °C. Set it to what the mixing valves are set to.
+This is one setting for all rooms, by default 30 °C. Set it to what the mixing valves are set to, on the **What the Heat** page or with the service `what_the_heat.set_water_temperature`. It may change over time, so unlike the sensors it is not part of the Shared settings.
 
 It only tells the controller what the temperature is: hot water delivers more heat in the same time, so the same demand needs a shorter opening. Nothing is read from or written to the mixing valves, the buffer or the heat pump.
 
@@ -49,7 +49,7 @@ If a room stays at 100% and below its target, the water cannot deliver enough he
 
 ### Outdoor and PV sensors
 
-These are shared settings too. Neither is required.
+These are the Shared settings. Neither is required.
 
 - **Outdoor temperature:** only logged for now, for learning later.
 - **PV power:** the current power of a PV installation, in W or kW. It is the sun signal described below. Use one read locally, since a cloud service may stop for hours.
@@ -68,7 +68,7 @@ Prediction from the weather forecast and the rest of per-room learning, such as 
 
 ### Where to see it
 
-- **Sidebar:** the **What the Heat** page shows all rooms as tiles, where you can change the target and see what each room has learned.
+- **Sidebar:** the **What the Heat** page shows all rooms as tiles, where you can change each room's target and the water temperature, and see what each room has learned.
 - **Dashboards:** each room has a thermostat entity for a regular tile or thermostat card, along with separate sensors.
 - **Diagnostics:** the file you can download on the device page contains one row per day.
 - **Logs:** see the [pilot test guide](docs/pilot-test.md).

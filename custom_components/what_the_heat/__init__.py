@@ -27,8 +27,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     from .coordinator import ZoneCoordinator  # noqa: PLC0415
     from .panel import async_add_panel  # noqa: PLC0415
+    from .settings import register_services  # noqa: PLC0415
 
     settings = await async_get_settings(hass)
+    register_services(hass, settings)
     coordinator = ZoneCoordinator(hass, entry, settings)
     await coordinator.async_load()
     await coordinator.async_config_entry_first_refresh()
@@ -52,7 +54,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Delete what was stored for a room. Without the shared settings, rooms use the defaults."""
+    """Delete what was stored for a room. Without the shared settings, rooms use no sensors."""
     if is_settings_entry(entry):
         from .settings import async_apply_settings  # noqa: PLC0415
 

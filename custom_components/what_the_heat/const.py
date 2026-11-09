@@ -5,17 +5,20 @@ from __future__ import annotations
 from typing import Any
 
 DOMAIN = "what_the_heat"
-VERSION = "0.7.0"
+VERSION = "0.7.1"
 PLATFORMS = ["binary_sensor", "button", "climate", "number", "select", "sensor"]
 
 CONF_THERMOSTAT = "thermostat"
 CONF_TARGET = "target"
 CONF_PHASE_OFFSET = "phase_offset"
-# Shared by all rooms, in the integration's own settings entry.
+# Shared by all rooms: the water temperature on the sidebar page, the sensors in the
+# integration's own settings entry.
 CONF_WATER_TEMPERATURE = "water_temperature"
 CONF_OUTDOOR_ENTITY = "outdoor_entity"
 CONF_PV_ENTITY = "pv_entity"
 SETTINGS_ID = "shared_settings"
+# Home Assistant lists entries by title, and the gear sorts before letters and digits.
+SETTINGS_TITLE = "⚙ Shared settings"
 LEGACY_SETTINGS = ("buffer_entity", "buffer_fallback", CONF_OUTDOOR_ENTITY)
 
 DEFAULT_TARGET = 21.0
@@ -28,6 +31,7 @@ TARGET_STEP = 0.5
 DEFAULT_WATER_TEMPERATURE = 30.0
 MIN_WATER_TEMPERATURE = 20.0
 MAX_WATER_TEMPERATURE = 38.0
+SERVICE_SET_WATER_TEMPERATURE = "set_water_temperature"
 
 UPDATE_INTERVAL_S = 60
 MAX_LOG_STEP_S = 300.0

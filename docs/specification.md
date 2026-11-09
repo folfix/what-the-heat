@@ -209,7 +209,7 @@ Worked example with `k1 = 0.27`, `k3 = 0.94`, target 21 °C, 3 °C outdoors: `L 
 
 ### 6.6 Water temperature
 
-- One global value for all rooms, by default 30 °C, in the range 20-38 °C. It is set in the Shared settings entry of the integration (6.9), and must match the mixing valves.
+- One global value for all rooms, by default 30 °C, in the range 20-38 °C. It may change over time, so it is set on the sidebar page or with the service `what_the_heat.set_water_temperature`, and must match the mixing valves.
 - It only tells the controller what the temperature is. Nothing is read from or written to the mixing valves, the buffer or the heat pump.
 - It scales the duty, since hotter water delivers the same heat in less time.
 - A room that needs more than the water can deliver stays fully open and below its target. Raising the temperature is then a manual step.
@@ -250,7 +250,7 @@ Valve exercise: any loop idle for 7 days is opened for 15 minutes. The 15 second
 
 ### 6.9 Integration and repository
 
-Each room is one configuration entry. The water temperature and the outdoor and PV sensors are shared by all rooms and rarely change, so they are kept in one more entry, **Shared settings**, which the first setup of the integration asks for and Configure changes later. Without it the rooms use 30 °C water and no sensors. The integration exposes the target, duty, PID terms, sun correction, valve state, status and daily comfort metrics as entities, plus a diagnostics download with one row per day. Each room also has a thermostat entity for dashboards, with the modes as presets. A sidebar page shows all rooms as tiles, using plain JavaScript with no build step. It changes only the target, and shows the shared water temperature. Each zone has a mode: `active` (the default for a new room), `observe` (calculates and logs only), or `handback`, set with its Mode entity.
+Each room is one configuration entry. The outdoor and PV sensors are shared by all rooms and rarely change, so they are kept in one more entry, **Shared settings**, which the first setup of the integration asks for and Configure changes later. Without it the rooms use no sensors. Its title starts with a gear, so that it sorts above the rooms. The water temperature is shared too, but may change over time, so it is set on the sidebar page (6.6). The integration exposes the target, duty, PID terms, sun correction, valve state, status and daily comfort metrics as entities, plus a diagnostics download with one row per day. Each room also has a thermostat entity for dashboards, with the modes as presets. A sidebar page shows all rooms as tiles, using plain JavaScript with no build step. It changes the targets and the water temperature, and nothing else. Each zone has a mode: `active` (the default for a new room), `observe` (calculates and logs only), or `handback`, set with its Mode entity.
 
 On switching from `observe` to `active`, the integral starts from how much the thermostat has recently been heating, but only if the room is near its target. Otherwise it starts from zero.
 
@@ -522,7 +522,7 @@ All based on what can be measured: air temperature and valve state.
 | Learning through small per-room layers rather than a neural network | Limited data, explainability, safety |
 | No reading or control of the buffer or heat pump, and one global water temperature | Owner decision: each floor has a mixing valve fixed at 30 °C |
 | PV power, read locally, as the sun signal | It shows the sun as it shines, often hours before a room does, without a cloud service |
-| Outdoor and PV sensors shared by all rooms, with the water temperature in a Shared settings entry | One house has one outdoor sensor and one PV installation. Owner decision: settings that rarely change belong in the integration's configuration, not on the sidebar page. |
+| Outdoor and PV sensors shared by all rooms, in a Shared settings entry, and the water temperature on the sidebar page | One house has one outdoor sensor and one PV installation. Owner decision: settings that rarely change belong in the integration's configuration, and the water temperature, which may change over time, on the page. |
 | A new room starts in active mode, and the sidebar page has no mode or reset buttons | Owner decision. The modes stay available through each room's Mode entity. |
 | First real test on one closed basement room at 21 °C, PID and cycles only | Least outside influence, smallest risk |
 | English only in the repository; work goes straight to the default branch | Owner decision |

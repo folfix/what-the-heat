@@ -33,6 +33,7 @@ from custom_components.what_the_heat.const import (
     CONF_WATER_TEMPERATURE,
     DOMAIN,
     SETTINGS_ID,
+    SETTINGS_TITLE,
     VERSION,
 )
 from custom_components.what_the_heat.coordinator import merged_config
@@ -140,6 +141,11 @@ async def add_settings(hass: HomeAssistant, **options) -> MockConfigEntry:
     return entry
 
 
+async def set_water(hass: HomeAssistant, temperature: float) -> None:
+    await hass.services.async_call(DOMAIN, "set_water_temperature", {"temperature": temperature}, blocking=True)
+    await hass.async_block_till_done()
+
+
 async def change_settings(hass: HomeAssistant, entry: MockConfigEntry, **options) -> None:
     """Change the shared settings with Configure, as the owner would."""
     result = await hass.config_entries.options.async_init(entry.entry_id)
@@ -158,11 +164,11 @@ async def test_the_first_setup_asks_for_the_shared_settings(hass: HomeAssistant)
     result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
     assert result["step_id"] == "settings"
     result = await hass.config_entries.flow.async_configure(
-        result["flow_id"], {CONF_WATER_TEMPERATURE: 32.0, CONF_PV_ENTITY: PV}
+        result["flow_id"], {CONF_OUTDOOR_ENTITY: OUTDOOR, CONF_PV_ENTITY: PV}
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert result["title"] == "Shared settings"
-    assert result["result"].options == {CONF_WATER_TEMPERATURE: 32.0, CONF_PV_ENTITY: PV}
+    assert result["title"] == SETTINGS_TITLE
+    assert result["result"].options == {CONF_OUTDOOR_ENTITY: OUTDOOR, CONF_PV_ENTITY: PV}
     await hass.async_block_till_done()
     result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
     assert result["step_id"] == "user"
@@ -397,26 +403,31 @@ async def test_water_temperature_defaults_to_30(hass: HomeAssistant) -> None:
 async def test_water_temperature_is_shared_by_all_rooms(hass: HomeAssistant) -> None:
     set_thermostat(hass)
     set_thermostat(hass, entity_id="climate.other_thermostat")
-    settings = await add_settings(hass)
     await add_room(hass)
     await add_room(hass, title="Other", thermostat="climate.other_thermostat")
-    await change_settings(hass, settings, **{CONF_WATER_TEMPERATURE: 32.5})
+    await set_water(hass, 32.5)
     assert float(hass.states.get(WATER).state) == 32.5
     assert float(hass.states.get("sensor.other_water_temperature").state) == 32.5
 
 
 async def test_water_temperature_scales_the_duty(hass: HomeAssistant) -> None:
     set_thermostat(hass, temperature=20.7)
-    settings = await add_settings(hass)
     await add_room(hass)
     cool = float(hass.states.get(DUTY).state)
-    await change_settings(hass, settings, **{CONF_WATER_TEMPERATURE: 38.0})
+    await set_water(hass, 38.0)
     assert float(hass.states.get(DUTY).state) < cool
 
 
-async def test_a_room_starts_with_the_shared_settings_already_there(hass: HomeAssistant) -> None:
-    # Home Assistant may start a room before the settings entry, so the room reads it itself.
-    settings_entry(**{CONF_WATER_TEMPERATURE: 33.0}).add_to_hass(hass)
+async def test_water_temperature_is_saved(hass: HomeAssistant, hass_storage) -> None:
+    set_thermostat(hass)
+    await add_room(hass)
+    await set_water(hass, 31.0)
+    assert hass_storage[f"{DOMAIN}.settings"]["data"][CONF_WATER_TEMPERATURE] == 31.0
+
+
+async def test_saved_water_temperature_is_restored(hass: HomeAssistant, hass_storage) -> None:
+    key = f"{DOMAIN}.settings"
+    hass_storage[key] = {"version": 1, "minor_version": 1, "key": key, "data": {CONF_WATER_TEMPERATURE: 33.0}}
     set_thermostat(hass)
     await add_room(hass)
     assert float(hass.states.get(WATER).state) == 33.0
@@ -424,12 +435,20 @@ async def test_a_room_starts_with_the_shared_settings_already_there(hass: HomeAs
 
 async def test_water_temperature_stays_within_limits(hass: HomeAssistant) -> None:
     set_thermostat(hass)
-    settings = await add_settings(hass)
     await add_room(hass)
     for value in (19.5, 38.5):
         with pytest.raises(vol.Invalid):
-            await change_settings(hass, settings, **{CONF_WATER_TEMPERATURE: value})
+            await set_water(hass, value)
     assert float(hass.states.get(WATER).state) == 30.0
+
+
+async def test_a_room_starts_with_the_shared_settings_already_there(hass: HomeAssistant) -> None:
+    # Home Assistant may start a room before the settings entry, so the room reads it itself.
+    hass.states.async_set(PV, "4000", {"unit_of_measurement": "W", "device_class": "power"})
+    settings_entry(**{CONF_PV_ENTITY: PV}).add_to_hass(hass)
+    set_thermostat(hass)
+    await add_room(hass)
+    assert hass.states.get(SUN).state != "unknown"
 
 
 async def test_a_shared_sensor_can_be_removed(hass: HomeAssistant) -> None:
@@ -438,18 +457,19 @@ async def test_a_shared_sensor_can_be_removed(hass: HomeAssistant) -> None:
     settings = await add_settings(hass, **{CONF_PV_ENTITY: PV})
     await add_room(hass)
     assert hass.states.get(SUN).state != "unknown"
-    await change_settings(hass, settings, **{CONF_WATER_TEMPERATURE: 30.0})
+    await change_settings(hass, settings)
     assert hass.states.get(SUN).state == "unknown"
 
 
-async def test_without_the_shared_settings_rooms_use_the_defaults(hass: HomeAssistant) -> None:
+async def test_without_the_shared_settings_rooms_use_no_sensors(hass: HomeAssistant) -> None:
     set_thermostat(hass)
-    settings = await add_settings(hass, **{CONF_WATER_TEMPERATURE: 34.0})
+    hass.states.async_set(PV, "4000", {"unit_of_measurement": "W", "device_class": "power"})
+    settings = await add_settings(hass, **{CONF_PV_ENTITY: PV})
     await add_room(hass)
-    assert float(hass.states.get(WATER).state) == 34.0
+    assert hass.states.get(SUN).state != "unknown"
     await hass.config_entries.async_remove(settings.entry_id)
     await hass.async_block_till_done()
-    assert float(hass.states.get(WATER).state) == 30.0
+    assert hass.states.get(SUN).state == "unknown"
 
 
 async def test_without_pv_there_is_no_sun_correction(hass: HomeAssistant) -> None:

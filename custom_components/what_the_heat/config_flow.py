@@ -26,16 +26,13 @@ from .const import (
     CONF_PV_ENTITY,
     CONF_TARGET,
     CONF_THERMOSTAT,
-    CONF_WATER_TEMPERATURE,
     DEFAULT_PHASE_OFFSET,
     DEFAULT_TARGET,
-    DEFAULT_WATER_TEMPERATURE,
     DOMAIN,
     MAX_TARGET,
-    MAX_WATER_TEMPERATURE,
     MIN_TARGET,
-    MIN_WATER_TEMPERATURE,
     SETTINGS_ID,
+    SETTINGS_TITLE,
     TARGET_STEP,
     is_settings_entry,
 )
@@ -43,15 +40,6 @@ from .coordinator import merged_config
 
 SHARED_SCHEMA = vol.Schema(
     {
-        vol.Required(CONF_WATER_TEMPERATURE, default=DEFAULT_WATER_TEMPERATURE): NumberSelector(
-            NumberSelectorConfig(
-                min=MIN_WATER_TEMPERATURE,
-                max=MAX_WATER_TEMPERATURE,
-                step=0.5,
-                mode=NumberSelectorMode.BOX,
-                unit_of_measurement=UnitOfTemperature.CELSIUS,
-            )
-        ),
         vol.Optional(CONF_OUTDOOR_ENTITY): EntitySelector(
             EntitySelectorConfig(domain="sensor", device_class=SensorDeviceClass.TEMPERATURE)
         ),
@@ -115,12 +103,12 @@ class WhatTheHeatConfigFlow(ConfigFlow, domain=DOMAIN):
         return self.async_create_entry(title=user_input[CONF_NAME], data=user_input)
 
     async def async_step_settings(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        """Ask for the settings shared by all rooms."""
+        """Ask for the sensors shared by all rooms."""
         if user_input is None:
             return self.async_show_form(step_id="settings", data_schema=SHARED_SCHEMA)
         await self.async_set_unique_id(SETTINGS_ID)
         self._abort_if_unique_id_configured(error="settings_exist")
-        return self.async_create_entry(title="Shared settings", data={}, options=user_input)
+        return self.async_create_entry(title=SETTINGS_TITLE, data={}, options=user_input)
 
     @staticmethod
     @callback
@@ -150,7 +138,7 @@ class SharedSettingsOptionsFlow(OptionsFlow):
         return await self.async_step_settings()
 
     async def async_step_settings(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        """Ask for the shared settings. A sensor left empty is removed."""
+        """Ask for the shared sensors. A sensor left empty is removed."""
         if user_input is not None:
             return self.async_create_entry(data=user_input)
         return self.async_show_form(

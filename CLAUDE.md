@@ -23,7 +23,7 @@ A Home Assistant custom integration for water-based underfloor heating. Requirem
 - `custom_components/what_the_heat/__init__.py` must stay free of top-level Home Assistant imports, since importing the core runs it.
 - The control core has no Home Assistant imports and no third-party dependencies, so that it runs in the simulator and in unit tests. Decisions belong in the core, and the Home Assistant layer stays thin.
 - A new room starts in active mode. Observe mode never writes to a device.
-- Settings shared by all rooms live in the Shared settings entry and change only through Configure, not on the sidebar page.
+- The shared sensors live in the Shared settings entry and change only through Configure. The water temperature may change over time, so it is set on the sidebar page.
 - Thermostats are controlled through setpoints only. Do not rely on `hvac_mode: off`.
 - Nothing critical may depend on AccuWeather, since it is a cloud service.
 - Simulation results compare options. Do not present them as predictions for the real house.

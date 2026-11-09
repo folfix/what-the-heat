@@ -10,14 +10,12 @@
     "step": {
       "settings": {
         "title": "Shared settings",
-        "description": "These settings are shared by all rooms and rarely change. Change them later with Configure on this entry. Add each room afterwards with Add entry.",
+        "description": "These sensors are shared by all rooms and rarely change. Change them later with Configure on this entry. Add each room afterwards with Add entry. The water temperature is set on the What the Heat page.",
         "data": {
-          "water_temperature": "Water temperature",
           "outdoor_entity": "Outdoor temperature sensor",
           "pv_entity": "PV power sensor"
         },
         "data_description": {
-          "water_temperature": "The temperature set on the mixing valves. It only tells the controller what the water temperature is, and changes nothing on the heat source.",
           "outdoor_entity": "Only logged for now, for learning later.",
           "pv_entity": "The current power of a PV installation, preferably read locally. It tells each room how much sun there is, so that the room can learn what the sun does to it."
         }
@@ -50,16 +48,26 @@
       },
       "settings": {
         "title": "Shared settings",
-        "description": "These settings are shared by all rooms. A sensor left empty is removed.",
+        "description": "These sensors are shared by all rooms. A sensor left empty is removed.",
         "data": {
-          "water_temperature": "Water temperature",
           "outdoor_entity": "Outdoor temperature sensor",
           "pv_entity": "PV power sensor"
         },
         "data_description": {
-          "water_temperature": "The temperature set on the mixing valves. It only tells the controller what the water temperature is, and changes nothing on the heat source.",
           "outdoor_entity": "Only logged for now, for learning later.",
           "pv_entity": "The current power of a PV installation, preferably read locally. It tells each room how much sun there is, so that the room can learn what the sun does to it."
+        }
+      }
+    }
+  },
+  "services": {
+    "set_water_temperature": {
+      "name": "Set water temperature",
+      "description": "Sets the temperature of the water going into the floors, for all rooms. It only tells the controller what the water temperature is, and changes nothing on the heat source.",
+      "fields": {
+        "temperature": {
+          "name": "Temperature",
+          "description": "The temperature set on the mixing valves."
         }
       }
     }
