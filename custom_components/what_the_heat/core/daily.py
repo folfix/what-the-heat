@@ -36,8 +36,10 @@ class _Day:
     outdoor_correction_s: float = 0.0
     outdoor_correction_sum: float = 0.0
     writes: int = 0
+    # What the room had learned at the end of the day, as the latest interval reported it.
+    learning: dict | None = None
 
-    def row(self) -> dict[str, float | int | str | None]:
+    def row(self) -> dict:
         """Return the day as a plain record, with percentages and means."""
 
         def share(part: float, whole: float) -> float | None:
@@ -62,6 +64,7 @@ class _Day:
             "sun_correction_pct": mean(self.sun_sum, self.sun_s),
             "outdoor_correction_pct": mean(self.outdoor_correction_sum, self.outdoor_correction_s),
             "writes": self.writes,
+            "learning": self.learning,
         }
 
 
@@ -102,6 +105,7 @@ class DailyLog:
         pv_w: float | None = None,
         sun_correction: float | None = None,
         outdoor_correction: float | None = None,
+        learning: dict | None = None,
     ) -> None:
         """Add one interval to the given date.
 
@@ -115,6 +119,8 @@ class DailyLog:
             self._day = _Day(date=date)
         day = self._day
         day.writes += writes
+        if learning is not None:
+            day.learning = learning
         if dt_s <= 0:
             return
         day.seconds += dt_s

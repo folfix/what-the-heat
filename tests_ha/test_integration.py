@@ -29,6 +29,7 @@ from custom_components.what_the_heat.const import (
     CONF_OUTDOOR_ENTITY,
     CONF_PHASE_OFFSET,
     CONF_PV_ENTITY,
+    CONF_REPORT_ENTITIES,
     CONF_TARGET,
     CONF_THERMOSTAT,
     CONF_WATER_TEMPERATURE,
@@ -49,6 +50,7 @@ OUTDOOR = "sensor.outdoor"
 PV = "sensor.pv_power"
 SUN = "sensor.pilot_sun_correction"
 OUTDOOR_CORRECTION = "sensor.pilot_outdoor_correction"
+WINDOW = "binary_sensor.pilot_window"
 MODE = "select.pilot_mode"
 TARGET = "number.pilot_target"
 DUTY = "sensor.pilot_duty"
@@ -856,7 +858,8 @@ async def test_the_full_report_holds_the_history_and_what_was_learned(
     set_thermostat(hass, temperature=20.5, setpoint=24.0, action="heating")
     hass.states.async_set(OUTDOOR, "-3.0", {"unit_of_measurement": "°C", "device_class": "temperature"})
     hass.states.async_set(PV, "1500", {"unit_of_measurement": "W", "device_class": "power"})
-    await add_settings(hass, **{CONF_OUTDOOR_ENTITY: OUTDOOR, CONF_PV_ENTITY: PV})
+    hass.states.async_set(WINDOW, "on")
+    await add_settings(hass, **{CONF_OUTDOOR_ENTITY: OUTDOOR, CONF_PV_ENTITY: PV, CONF_REPORT_ENTITIES: [WINDOW]})
     entry = await add_room(hass)
     set_thermostat(hass, temperature=20.6, setpoint=24.0, action="heating")
     await tick(hass, entry)
@@ -877,6 +880,13 @@ async def test_the_full_report_holds_the_history_and_what_was_learned(
     assert history[OUTDOOR][-1][1] == -3.0
     assert history[PV][-1][1] == 1500.0
     assert DUTY in history
+    assert history[WINDOW][-1][1] == "on"
+    columns = report["report"]["history_columns"]
+    assert columns[THERMOSTAT] == ["time", "state", "current_temperature", "temperature", "hvac_action"]
+    assert columns[SUN] == ["time", "state", "sun_pct"]
+    assert len(history[SUN][-1]) == 3
+    assert room["today"]["learning"]["sunny_days"] == 0
+    assert len(room["today"]["learning"]["sun_profile"]) == 24
 
 
 async def test_the_report_works_without_a_recorder(hass: HomeAssistant, hass_client) -> None:

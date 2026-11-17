@@ -56,6 +56,14 @@ class DailyLogTest(unittest.TestCase):
         self.assertEqual(today["sun_correction_pct"], -20.0)
         self.assertEqual(today["outdoor_correction_pct"], 2.0)
 
+    def test_the_row_keeps_what_was_learned_at_the_end_of_the_day(self) -> None:
+        log = DailyLog()
+        log.add("2026-11-08", HOUR, target=23.0, learning={"sunny_days": 2})
+        log.add("2026-11-08", HOUR, target=23.0, learning={"sunny_days": 3})
+        log.add("2026-11-09", HOUR, target=23.0)
+        self.assertEqual(log.rows[0]["learning"], {"sunny_days": 3})
+        self.assertIsNone(log.today["learning"])
+
     def test_without_pv_there_is_no_energy(self) -> None:
         log = DailyLog()
         log.add("2026-11-08", HOUR, target=23.0)

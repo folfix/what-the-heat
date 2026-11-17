@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 DOMAIN = "what_the_heat"
-VERSION = "0.9.0"
+VERSION = "0.10.0"
 PLATFORMS = ["binary_sensor", "button", "climate", "number", "select", "sensor"]
 
 CONF_THERMOSTAT = "thermostat"
@@ -16,6 +16,8 @@ CONF_PHASE_OFFSET = "phase_offset"
 CONF_WATER_TEMPERATURE = "water_temperature"
 CONF_OUTDOOR_ENTITY = "outdoor_entity"
 CONF_PV_ENTITY = "pv_entity"
+# Any other entities whose history the full report should hold, such as window sensors.
+CONF_REPORT_ENTITIES = "report_entities"
 SETTINGS_ID = "shared_settings"
 # Home Assistant lists entries by title, and the gear sorts before letters and digits.
 SETTINGS_TITLE = "⚙ Shared settings"

@@ -113,6 +113,19 @@ def _is_available(state: State | None) -> bool:
     return state is not None and state.state not in (STATE_UNAVAILABLE, STATE_UNKNOWN)
 
 
+def _learning(learned: LearnedState, integral: float, sun_reference_w: float) -> dict[str, Any]:
+    """Return what a room has learned, for the daily row, so that the report shows how it changed."""
+    return {
+        "integral": round(integral, 2),
+        "demand": None if learned.demand is None else round(learned.demand, 1),
+        "sunny_days": learned.sunny_days,
+        "sun_active": learned.sun_active,
+        "sun_profile": [round(value, 2) for value in learned.sun_profile],
+        "outdoor_weight": round(learned.outdoor_weight, 4),
+        "sun_reference_w": round(sun_reference_w),
+    }
+
+
 def read_thermostat(state: State | None) -> ThermostatReading:
     """Translate a climate entity's state. Everything is empty while it is unavailable."""
     if not _is_available(state):
@@ -215,6 +228,7 @@ class ZoneCoordinator(DataUpdateCoordinator[ZoneData]):
             await self._async_execute(command)
         dt_s = 0.0 if self._last_step_s is None else min(now_s - self._last_step_s, MAX_LOG_STEP_S)
         self._last_step_s = now_s
+        learned = self.runner.learned()
         self.log.add(
             dt_util.now().date().isoformat(),
             dt_s,
@@ -228,6 +242,7 @@ class ZoneCoordinator(DataUpdateCoordinator[ZoneData]):
             pv_w=pv_w,
             sun_correction=None if sun is None else decision.sun,
             outdoor_correction=None if outdoor is None else decision.outdoor,
+            learning=_learning(learned, decision.integral, self._global.sun_reference_w),
         )
         self._update_notification(step.problems)
         # A delayed save restarts its timer on each call, so it is only called when due.
@@ -235,7 +250,7 @@ class ZoneCoordinator(DataUpdateCoordinator[ZoneData]):
             self._last_save_s = now_s
             self._store.async_delay_save(self.snapshot, 1)
         return ZoneData(
-            step, reading, water, outdoor, sun, self.log.today, self.runner.learned(), self.runner.colder_than_usual
+            step, reading, water, outdoor, sun, self.log.today, learned, self.runner.colder_than_usual
         )
 
     def _available_state(self, entity_id: str | None) -> State | None:

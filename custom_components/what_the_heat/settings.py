@@ -20,6 +20,7 @@ from homeassistant.helpers.storage import Store
 from .const import (
     CONF_OUTDOOR_ENTITY,
     CONF_PV_ENTITY,
+    CONF_REPORT_ENTITIES,
     CONF_WATER_TEMPERATURE,
     DEFAULT_WATER_TEMPERATURE,
     DOMAIN,
@@ -50,6 +51,7 @@ class GlobalSettings:
         self.water_temperature = DEFAULT_WATER_TEMPERATURE
         self.outdoor_entity: str | None = None
         self.pv_entity: str | None = None
+        self.report_entities: list[str] = []
         self._sun = SunSignal()
         self._sun_entity: str | None = None  # the PV sensor whose full sun the signal holds
         self._last_save_s: float | None = None
@@ -65,6 +67,7 @@ class GlobalSettings:
         """Use the sensors of the settings entry. A missing one is not used."""
         self.outdoor_entity = options.get(CONF_OUTDOOR_ENTITY) or None
         self.pv_entity = options.get(CONF_PV_ENTITY) or None
+        self.report_entities = list(options.get(CONF_REPORT_ENTITIES) or [])
         if self.pv_entity != self._sun_entity:
             # Another installation has its own full sun.
             self._sun = SunSignal()
@@ -75,12 +78,18 @@ class GlobalSettings:
         self.water_temperature = value
         await self._store.async_save(self._stored())
 
+    @property
+    def sun_reference_w(self) -> float:
+        """Return the PV power that counts as full sun."""
+        return self._sun.reference_w
+
     def snapshot(self) -> dict[str, Any]:
         """Return the settings and what is known about full sun, for diagnostics."""
         return {
             CONF_WATER_TEMPERATURE: self.water_temperature,
             CONF_OUTDOOR_ENTITY: self.outdoor_entity,
             CONF_PV_ENTITY: self.pv_entity,
+            CONF_REPORT_ENTITIES: self.report_entities,
             "sun": self._sun.snapshot(),
         }
 

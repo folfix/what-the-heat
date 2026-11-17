@@ -43,6 +43,9 @@ ROOM_KEYS = (
 )
 # What the controller reads from a thermostat, besides its state.
 THERMOSTAT_ATTRIBUTES = ("current_temperature", "temperature", "hvac_action")
+# What the controller saw behind its corrections: the share of full sun, and how much
+# colder than usual it was outside.
+ROOM_ATTRIBUTES = {"sun_correction": ("sun_pct",), "outdoor_correction": ("colder_than_usual",)}
 _REGISTERED = f"{DOMAIN}_report_registered"
 
 
@@ -62,24 +65,20 @@ def _rows(states: list[State], attributes: tuple[str, ...]) -> list[list[Any]]:
 
 
 async def _async_history(
-    hass: HomeAssistant, start: datetime, end: datetime, thermostats: list[str], others: list[str]
+    hass: HomeAssistant, start: datetime, end: datetime, attributes: dict[str, tuple[str, ...]]
 ) -> dict[str, list[list[Any]]] | None:
-    """Return the recorded rows of each entity, or None without a recorder."""
+    """Return the recorded rows of each entity, with the given attributes, or None without a recorder."""
     if "recorder" not in hass.config.components:
         return None
     from homeassistant.components.recorder import get_instance, history  # noqa: PLC0415
 
-    entity_ids = sorted(set(thermostats) | set(others))
-    if not entity_ids:
+    if not attributes:
         return {}
     # Every recorded change, attributes included, and the state at the start.
     states = await get_instance(hass).async_add_executor_job(
-        history.get_significant_states, hass, start, end, entity_ids, None, True, False, False, False
+        history.get_significant_states, hass, start, end, sorted(attributes), None, True, False, False, False
     )
-    return {
-        entity_id: _rows(rows, THERMOSTAT_ATTRIBUTES if entity_id in thermostats else ())
-        for entity_id, rows in states.items()
-    }
+    return {entity_id: _rows(rows, attributes[entity_id]) for entity_id, rows in states.items()}
 
 
 async def async_build_report(hass: HomeAssistant, days: int = DEFAULT_DAYS) -> dict[str, Any]:
@@ -89,8 +88,10 @@ async def async_build_report(hass: HomeAssistant, days: int = DEFAULT_DAYS) -> d
     settings = await async_get_settings(hass)
     registry = er.async_get(hass)
     rooms: list[dict[str, Any]] = []
-    thermostats: list[str] = []
-    others = [entity for entity in (settings.outdoor_entity, settings.pv_entity) if entity]
+    # The entities whose history goes in, each with the attributes worth keeping.
+    attributes: dict[str, tuple[str, ...]] = {
+        entity: () for entity in (settings.outdoor_entity, settings.pv_entity, *settings.report_entities) if entity
+    }
     for entry in hass.config_entries.async_entries(DOMAIN):
         if is_settings_entry(entry) or entry.state is not ConfigEntryState.LOADED:
             continue
@@ -101,8 +102,9 @@ async def async_build_report(hass: HomeAssistant, days: int = DEFAULT_DAYS) -> d
             for item in er.async_entries_for_config_entry(registry, entry.entry_id)
             if item.translation_key in ROOM_KEYS
         }
-        thermostats.append(config[CONF_THERMOSTAT])
-        others.extend(entities.values())
+        attributes[config[CONF_THERMOSTAT]] = THERMOSTAT_ATTRIBUTES
+        for key, entity in entities.items():
+            attributes[entity] = ROOM_ATTRIBUTES.get(key, ())
         rooms.append(
             {
                 "title": entry.title,
@@ -125,14 +127,12 @@ async def async_build_report(hass: HomeAssistant, days: int = DEFAULT_DAYS) -> d
             "time_zone": hass.config.time_zone,
             # Solar time is UTC plus this many hours. Rounded, so that it does not give the place away.
             "solar_offset_h": round(hass.config.longitude / 15.0, 1),
-            "history_rows": (
-                "[time in seconds since 1970 UTC, state], and for a thermostat also "
-                + ", ".join(THERMOSTAT_ATTRIBUTES)
-            ),
+            # The columns of each entity's rows in history. Times are seconds since 1970 in UTC.
+            "history_columns": {entity: ["time", "state", *names] for entity, names in sorted(attributes.items())},
         },
         "shared": settings.snapshot(),
         "rooms": rooms,
-        "history": await _async_history(hass, start, end, thermostats, others),
+        "history": await _async_history(hass, start, end, attributes),
     }
 
 

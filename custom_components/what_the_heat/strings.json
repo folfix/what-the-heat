@@ -13,11 +13,13 @@
         "description": "These sensors are shared by all rooms and rarely change. Change them later with Configure on this entry. Add each room afterwards with Add entry. The water temperature is set on the What the Heat page.",
         "data": {
           "outdoor_entity": "Outdoor temperature sensor",
-          "pv_entity": "PV power sensor"
+          "pv_entity": "PV power sensor",
+          "report_entities": "Other entities in the full report"
         },
         "data_description": {
           "outdoor_entity": "Preferably in the shade. Each room learns how much more heat it needs when it is colder outside than usual.",
-          "pv_entity": "The current power of a PV installation, preferably read locally. It tells each room how much sun there is, so that the room can learn what the sun does to it."
+          "pv_entity": "The current power of a PV installation, preferably read locally. It tells each room how much sun there is, so that the room can learn what the sun does to it.",
+          "report_entities": "Not used for control. Their history goes into the full report, to explain what the rooms do: window sensors, a second thermometer, the power of a computer in a room or anything else."
         }
       },
       "user": {
@@ -51,11 +53,13 @@
         "description": "These sensors are shared by all rooms. A sensor left empty is removed.",
         "data": {
           "outdoor_entity": "Outdoor temperature sensor",
-          "pv_entity": "PV power sensor"
+          "pv_entity": "PV power sensor",
+          "report_entities": "Other entities in the full report"
         },
         "data_description": {
           "outdoor_entity": "Preferably in the shade. Each room learns how much more heat it needs when it is colder outside than usual.",
-          "pv_entity": "The current power of a PV installation, preferably read locally. It tells each room how much sun there is, so that the room can learn what the sun does to it."
+          "pv_entity": "The current power of a PV installation, preferably read locally. It tells each room how much sun there is, so that the room can learn what the sun does to it.",
+          "report_entities": "Not used for control. Their history goes into the full report, to explain what the rooms do: window sensors, a second thermometer, the power of a computer in a room or anything else."
         }
       }
     }

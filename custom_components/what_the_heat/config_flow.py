@@ -24,6 +24,7 @@ from .const import (
     CONF_OUTDOOR_ENTITY,
     CONF_PHASE_OFFSET,
     CONF_PV_ENTITY,
+    CONF_REPORT_ENTITIES,
     CONF_TARGET,
     CONF_THERMOSTAT,
     DEFAULT_PHASE_OFFSET,
@@ -44,6 +45,7 @@ SHARED_SCHEMA = vol.Schema(
             EntitySelectorConfig(domain="sensor", device_class=SensorDeviceClass.TEMPERATURE)
         ),
         vol.Optional(CONF_PV_ENTITY): EntitySelector(EntitySelectorConfig(domain="sensor", device_class=SensorDeviceClass.POWER)),
+        vol.Optional(CONF_REPORT_ENTITIES): EntitySelector(EntitySelectorConfig(multiple=True)),
     }
 )
 ROOM_FIELDS = {
