@@ -7,6 +7,7 @@ A Home Assistant custom integration for water-based underfloor heating. Requirem
 - **English only in the repository:** code, comments, identifiers, documentation, commit messages, issues. Conversation with the owner may be in Polish. Local Polish notes must not be committed.
 - **Work goes straight to `main`.** No feature branches or pull requests unless asked.
 - **Public repository:** do not commit personal data or device identifiers such as MAC addresses, Zigbee addresses, tokens or local URLs.
+- **Every new version gets release notes:** bump the version in `const.py` and `manifest.json`, add a section at the top of `CHANGELOG.md` written for the owner, push, then create a GitHub release with the same notes: `gh release create vX.Y.Z --title X.Y.Z --notes-file <the section>`. Home Assistant shows these notes when HACS offers the update.
 
 ## Commands
 
